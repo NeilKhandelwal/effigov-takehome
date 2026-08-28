@@ -70,7 +70,7 @@ backend :8000, dashboard :3000, agent = console process (no port)
 Agent runs in `dev` mode (`uv run python src/agent.py dev`, no `agent_name` → auto-dispatched to every new room).
 Console mode keeps working for local testing.
 - `GET /token?identity=<string>` -> {"token": "<jwt>", "url": LIVEKIT_URL, "room": "call-<8 hex>"}. Backend signs with
-  LIVEKIT_API_KEY/SECRET from backend/.env (dep: livekit-api). Room name is generated per token; grants: roomJoin only.
+  LIVEKIT_API_KEY/SECRET from backend/.env (dep: livekit-api). Room name is generated per token; grants: roomJoin + publish/subscribe (the browser must publish mic audio).
 - `calls` gains nullable `room TEXT`. `POST /calls` accepts optional {"room": "..."}; the agent sends ctx.room.name.
   `GET /calls?room=<name>` -> [Call] (exact match). Call JSON includes "room".
 - Dashboard `/call`: "Start call" -> fetch token -> LiveKitRoom (audio only) with RoomAudioRenderer, a voice-assistant

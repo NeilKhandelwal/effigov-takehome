@@ -12,8 +12,8 @@ One narrow workflow, end to end:
 4. The caller rings back, gives their phone number, and the agent reads the current status from `lookup_case`.
 
 ```
- mic ──► agent/  (LiveKit Agents, console mode)          dashboard/ (Next.js) ◄── Chrome
-            │  httpx: POST /cases, /calls, /transcript          ▲  fetch + WS /ws
+ mic ──► agent/  (LiveKit Agents, dev mode)            dashboard/ (Next.js) ◄── Chrome
+            │  httpx: POST /cases, /calls, /calls/{id}/transcript          ▲  fetch + WS /ws
             ▼                                                    │
          backend/  (FastAPI + stdlib sqlite3)  ──── broadcast {type,id} ────┘
          tables: cases · calls · transcript · case_events
@@ -26,21 +26,25 @@ One narrow workflow, end to end:
 **Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Three function tools: `create_case`, `lookup_case`, `add_note`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
 
 ## Run (three terminals)
+
+**Prereqs:** [uv](https://docs.astral.sh/uv/) (installs Python 3.13 itself), Node 20+, and a LiveKit Cloud project for the `LIVEKIT_*` keys (Settings → Keys). Without the keys, everything except the voice call works.
+
 ```sh
 # 1. backend (http://localhost:8000, SQLite file backend/cases.db)
 cd backend && cp .env.example .env    # LIVEKIT_* (needed only for the browser call's /token)
 uv sync && uv run python -m scripts.seed && uv run uvicorn app.main:app --reload --port 8000
-# 2. dashboard (http://localhost:3000 — open it at localhost, not 127.0.0.1, for CORS)
+# 2. dashboard (http://localhost:3000 — open it at localhost, not 127.0.0.1, for CORS; backend URL is hardcoded in src/lib/api.ts)
 cd dashboard && npm install && npm run dev
 # 3. voice agent worker — joins every browser call (LiveKit Cloud dispatch)
 cd agent && cp .env.example .env      # LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET
-uv sync && uv run python src/agent.py dev
+uv sync && uv run python src/agent.py download-files   # once: turn-detector / VAD models
+uv run python src/agent.py dev
 ```
 Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
 
 Terminal-only alternative for the voice side: `uv run python src/agent.py console` talks through your mic with no browser.
 
-Before a demo: `cd backend && uv run python -m scripts.reset_demo` (wipes all tables, reseeds 3 cases). Reset to a clean demo state at any time: `cd backend && uv run python -m scripts.reset_demo`.
+Reset to a clean demo state at any time (do it right before a demo): `cd backend && uv run python -m scripts.reset_demo` — wipes all tables, reseeds the 3 cases.
 
 Built in the 3-hour window with Claude Code as pair: I set the contract, data model, and every design decision (see `DECISIONS.md`); agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one.
 
