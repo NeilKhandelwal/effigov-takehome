@@ -160,7 +160,8 @@ class Assistant(Agent):
                 sentence as the request; only ask for it if you have none. To add a note, call
                 add_note as soon as you have a case ID and the note's wording, even if the ID
                 was spoken as words ("c one zero zero one" is C-1001); don't ask for the note
-                again.
+                again. When you find a case, always tell the caller its current status in
+                plain words (open, in progress, or resolved) before anything else about it.
 
                 This is a voice call: plain text only, one or two short sentences per reply,
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
