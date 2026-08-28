@@ -32,8 +32,9 @@ ISSUE_TYPES = "missed_pickup, pothole, streetlight, water, animal, other"
 HEADERS = {"X-Source": "voice"}  # audit log attributes these writes to the voice agent
 SUMMARY_PROMPT = (
     "Summarize this City services call for staff in at most two sentences: what the "
-    "resident wanted, what was done (case created/found, note added), and any "
-    "follow-up needed. Transcript:\n"
+    "resident wanted, what was actually done (case created/found, note added), and any "
+    "follow-up needed. State only what the transcript shows; if the call ended before a "
+    "case was created or found, say so plainly. Transcript:\n"
 )
 
 
@@ -134,7 +135,9 @@ class Assistant(Agent):
                 case. Politely decline anything else.
 
                 To file a request, collect one at a time: the caller's name, their phone
-                number, the issue type, and a one-sentence description. Only the phone number
+                number, the issue type, and a one-sentence description. If the caller spells
+                their name letter by letter, use exactly the spelled version and drop what you
+                heard before. Only the phone number
                 needs confirming: read the digits back. Do not ask the caller to confirm the
                 name, issue type, or description; just move on to the next question. Map what
                 the caller says onto exactly one of: {ISSUE_TYPES}.
