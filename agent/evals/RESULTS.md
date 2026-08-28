@@ -76,3 +76,7 @@ They cover tool *selection and arguments* — the part only an LLM can get wrong
 unit tests in `tests/test_helpers.py` cannot reach. They do not cover STT (text in, not audio),
 TTS, barge-in, or wording of what the agent says. A scenario passes only if the backend write it
 implies also happened, so a green row means a case (or note) really exists.
+
+## Re-run after the prompt fixes (14:20, commit 3285bf1 on main via PR #2)
+
+14/15. `lookup_by_phone` and `spelled_case_id` now pass. Remaining miss: `loud_neighbours_falls_back_to_other` — the agent opened the case but did not call `update_case(issue_type="other")` within the scenario's turn budget. One run; not re-rolled.

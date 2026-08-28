@@ -35,3 +35,8 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 | Post-call summary | 4862a32, e0a5f85 |
 | Dashboard console + polish | e498c5a, 67f470c, cf941e5, e0d5b3a, 743991f |
 | Demo reset + clean-clone fixes | fe66227, 315626c |
+0:59 | case opened at name+phone, issue_type/description filled by update_case as learned; agent never sets status (PR #2) | spec: "issue type updates once the agent has enough confidence" | one more tool call per case, one more prompt sequence to keep gpt-4.1-mini honest
+1:02 | tried draft audit PRs (#3–#13) for features already on main; closed 5 min later | cherry-picked copies showed merge conflicts, not clean diffs; commit links do the job | 5 min
+1:23 | offline eval: 15 hand-labelled scenarios scored against the real agent (PR #16), 12/15 → two prompt fixes → 14/15, miss named | "did the agent actually work" is their containment question | ~8 min wall; LLM evals flake, score reported not forced
+1:29 | PR #2 merged after: my line-by-line read, Greptile P1 fixed, one live browser call (C-1010 fill-in verified), eval re-run | it's in the brief's "polished" list and it's the last agent change | verified line moved twice by follow-up commits
+1:29 | cut PR #1 (stepper), leave #14 (filters) and #15 (warm transfer + auto hang-up) open, unmerged | freeze; every merged PR is more to defend live, #15 could end the demo call early | features built but not shipped — say so in the debrief

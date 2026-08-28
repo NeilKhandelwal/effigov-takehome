@@ -6,7 +6,7 @@ A resident calls the City services line, a LiveKit voice agent files a service r
 
 One narrow workflow, end to end:
 
-1. Caller says "I want to report a pothole." The agent collects name, phone (confirmed by reading digits back), issue type, and a one-sentence description, then calls `create_case` and reads the case ID back.
+1. Caller says "I want to report a pothole." The agent collects name and phone (confirmed by reading the digits back; partial numbers are refused) and opens the case right then. As it learns the issue type and a one-sentence description it fills them in with `update_case` — staff watch the fields change mid-call — and only then reads the case ID back.
 2. The dashboard shows the call the moment it starts, streams the transcript line by line, and shows the new case at the top of the list — no refresh.
 3. Staff open the case, change its status, and see an audit trail of every change and who made it (`staff` vs `voice`).
 4. The caller rings back, gives their phone number, and the agent reads the current status from `lookup_case`.
@@ -23,9 +23,9 @@ One narrow workflow, end to end:
 
 **Real-time.** After every write the backend pushes `{"type": "case"|"call"|"transcript", "id": ...}` on `WS /ws`. The socket carries no payload; clients refetch what they're showing. Refetch is idempotent, so duplicate or out-of-order frames can't corrupt UI state. A 2-second poll stays on as a fallback.
 
-**Evals.** Fifteen hand-labelled calls run through the real agent and the real backend in-process, no audio: 12/15 pass. They check tool selection and arguments — issue-type mapping, spoken phone numbers, create-before-update ordering, refusing a 7-digit number, staying out of scope — plus what actually landed in the DB. `cd agent && uv run pytest -m eval`; the two real failures are written up in [agent/evals/RESULTS.md](agent/evals/RESULTS.md).
+**Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Four function tools: `create_case`, `update_case`, `lookup_case`, `add_note`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
 
-**Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Three function tools: `create_case`, `lookup_case`, `add_note`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
+**Does the agent actually work?** `agent/tests/test_scenarios.py` (PR #16) runs 15 hand-labelled scenarios through the real agent and backend and checks which tools it called with what. Score on the shipped prompt: **14/15** on one run — the miss is a "loud neighbours" call the agent opened but never classified as `other` within the scenario's turn budget. Run with `cd agent && uv run pytest -m eval` (LLM calls; deselected by default). The first run and the two failures it found are written up in [agent/evals/RESULTS.md](agent/evals/RESULTS.md).
 
 ## Run (three terminals)
 
@@ -65,7 +65,6 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 ## Known limitations
 
-- **STT mishears names** (Khandelwal → "Kendall Wall"). The agent applies a spelled name, but the first attempt will often be wrong on the transcript.
 - `notes` is replace-on-write; the agent appends client-side (GET then PATCH). Two simultaneous note-writers would race. One agent, one staff user — acceptable here.
 - `PATCH /calls/{id}` re-links silently if `lookup_case` then `create_case` both run on one call; one call → one case is the model.
 - `case_events` has no rows for cases created before the table existed (the three seeded ones).
@@ -78,8 +77,7 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 ## What I'd do next
 
-1. **Progressive case fields** — create the case as soon as name + phone + type are known and update description/status as the call goes on, so staff see fields change mid-call (their "issue type updates once confident" behaviour).
-2. **Warm transfer** — a `transfer_to_staff` tool that flips the call to `needs_person`, pushes it to the top of the live strip with the transcript, and tells the caller someone is picking up.
-3. **Evaluate the agent, not just run it** — hand-label 20 calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
-4. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
-5. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
+1. **Warm transfer** — a `transfer_to_staff` tool that flips the call to `needs_person`, pushes it to the top of the live strip with the transcript, and tells the caller someone is picking up.
+2. **Evaluate the agent on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
+3. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
+4. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
