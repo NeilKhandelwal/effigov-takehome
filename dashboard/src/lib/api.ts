@@ -72,11 +72,12 @@ export const patchCase = (id: string, body: Partial<Case>) =>
 export type Call = {
   id: string;
   case_id: string | null;
-  status: "active" | "ended";
+  status: "active" | "needs_person" | "ended";
   started_at: string;
   ended_at: string | null;
   summary?: string | null; // written by the agent on hang-up (CONTRACT "## Summary")
   room: string | null;
+  transfer_reason: string | null; // why the agent handed off (CONTRACT "## Warm transfer")
 };
 
 export type TranscriptLine = {
@@ -93,6 +94,10 @@ export const listCalls = (status?: Call["status"]) =>
   request<Call[]>(status ? `/calls?status=${status}` : "/calls");
 export const getCall = (id: string) => request<CallWithTranscript>(`/calls/${id}`);
 export const getCaseCalls = (id: string) => request<CallWithTranscript[]>(`/cases/${id}/calls`);
+
+// Staff-side writes on a call: picking up a transfer, ending it, linking a case.
+export const patchCall = (id: string, body: Partial<Pick<Call, "status" | "transfer_reason" | "case_id">>) =>
+  request<Call>(`/calls/${id}`, json("PATCH", body));
 
 // ---- Browser call (see ../CONTRACT.md "## Browser call") ----
 

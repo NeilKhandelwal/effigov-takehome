@@ -86,3 +86,15 @@ Console mode keeps working for local testing.
   same LLM for at most two sentences over the call's own transcript. Fewer than 2 turns, or any LLM
   failure -> no summary written (stays null); the call is still marked ended.
 - Dashboard: shows it on /calls/[id] and on the case's call list; absent = "no summary".
+
+## Warm transfer (added 14:05) — the caller asks for a person
+- `CallStatus` gains `"needs_person"`: `active | needs_person | ended`. It is a live status, not a terminal
+  one — `ended_at` stays null until the call is actually ended.
+- `calls` gains nullable `transfer_reason TEXT`; Call JSON includes `"transfer_reason"` (null unless transferred).
+- `PATCH /calls/{id}` accepts `{"status": "needs_person", "transfer_reason": "..."}` like its other fields;
+  staff PATCH `{"status": "active"}` when they pick up. `GET /calls?status=needs_person` lists the queue.
+- Agent tool `transfer_to_staff(reason)` -> PATCHes the call and tells the agent to keep the line open.
+  Used when the caller asks for a human, is upset, or wants something outside the other tools.
+- Dashboard: the home "Live calls" strip shows needs_person calls first with an amber "Needs a person" banner
+  (plus the reason); /calls and /calls/[id] show an amber badge, and /calls/[id] has a "Picked up" button
+  that PATCHes the call back to active.

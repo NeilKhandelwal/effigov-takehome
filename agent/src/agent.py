@@ -160,6 +160,9 @@ class Assistant(Agent):
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
                 returned. If a tool says the system is unreachable, tell the caller that. If asked why
                 you need something, say you need it to file or find the case; don't cite policies.
+                If the caller asks for a human, is upset, or wants something none of your tools
+                cover, call transfer_to_staff with a short reason, then tell them someone is
+                picking up and keep the line open.
                 """
             ),
         )
@@ -288,6 +291,19 @@ class Assistant(Agent):
         except Exception:
             logger.exception("add_note failed")
             return BACKEND_DOWN
+
+    @function_tool
+    async def transfer_to_staff(self, context: RunContext, reason: str) -> str:
+        """Hand the call to a human staff member. Call it when the caller asks for a person,
+        is upset, or wants something the other tools don't cover.
+
+        Args:
+            reason: one short phrase saying why, shown to staff on the dashboard
+        """
+        # marks the call needs_person; it stays live (no ended_at) so staff see it waiting
+        await patch_call(self.call_id, {"status": "needs_person", "transfer_reason": reason})
+        return ("Transfer requested. Tell the caller a staff member will pick up shortly and to "
+                "stay on the line. Do not end the call.")
 
 
 server = AgentServer()

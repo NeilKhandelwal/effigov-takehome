@@ -8,7 +8,7 @@ def test_call_lifecycle_sets_ended_at(client):
     call = r.json()
     assert call == {"id": "CALL-1", "case_id": None, "status": "active",
                     "started_at": call["started_at"], "ended_at": None, "room": None,
-                    "summary": None}
+                    "summary": None, "transfer_reason": None}
     assert client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"}).status_code == 201
     ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
     assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
@@ -90,3 +90,29 @@ def test_token_returns_room_scoped_credentials(client, monkeypatch):
     body = client.get("/token", params={"identity": "browser"}).json()
     assert body["url"] == "wss://example.livekit.cloud"
     assert body["room"].startswith("call-") and body["token"].count(".") == 2
+
+
+def test_needs_person_is_a_live_status_not_an_ended_one(client):
+    """A transferred call is still on the line: an ended_at here would drop it from 'Live calls'
+    and staff would never see the caller waiting."""
+    client.post("/calls")
+    r = client.patch("/calls/CALL-1", json={"status": "needs_person",
+                                           "transfer_reason": "caller asked for a person"})
+    assert r.status_code == 200
+    call = r.json()
+    assert call["status"] == "needs_person" and call["ended_at"] is None
+    assert call["transfer_reason"] == "caller asked for a person"
+    assert [c["id"] for c in client.get("/calls", params={"status": "needs_person"}).json()] == ["CALL-1"]
+    assert client.get("/calls", params={"status": "active"}).json() == []
+
+
+def test_transfer_reason_survives_pickup_and_hangup(client):
+    """Staff pick up (back to active) and later hang up; the reason is the record of why
+    the agent handed off, so it must outlive both writes."""
+    client.post("/calls")
+    client.patch("/calls/CALL-1", json={"status": "needs_person", "transfer_reason": "upset caller"})
+    picked_up = client.patch("/calls/CALL-1", json={"status": "active"}).json()
+    assert picked_up["status"] == "active" and picked_up["ended_at"] is None
+    ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
+    assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
+    assert ended["transfer_reason"] == "upset caller"
