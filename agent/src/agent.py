@@ -43,10 +43,10 @@ def clean_text(text: str) -> str:
 
 # Call-record helpers. call_id is None when the backend was down at session start:
 # every helper then no-ops, so the voice call keeps working without the dashboard.
-async def start_call() -> str | None:
+async def start_call(room: str | None = None) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=5, headers=HEADERS) as client:
-            r = await client.post(f"{BACKEND}/calls", json={})
+            r = await client.post(f"{BACKEND}/calls", json={"room": room})
             r.raise_for_status()
             return r.json()["id"]
     except Exception:
@@ -201,7 +201,9 @@ class Assistant(Agent):
 server = AgentServer()
 
 
-@server.rtc_session(agent_name="city-services")
+# no agent_name: the worker is auto-dispatched to every new room, so the browser
+# client only needs a token (explicit dispatch would need a second API call)
+@server.rtc_session()
 async def city_services(ctx: JobContext):
     ctx.log_context_fields = {"room": ctx.room.name}
 
@@ -233,7 +235,7 @@ async def city_services(ctx: JobContext):
         ),
     )
 
-    agent.call_id = await start_call()
+    agent.call_id = await start_call(ctx.room.name)
 
     # session.on handlers must be sync, so HTTP work runs in a task; the set keeps a
     # strong reference until done (asyncio only holds tasks weakly, so they could be GC'd)
