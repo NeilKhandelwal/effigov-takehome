@@ -16,7 +16,7 @@ class FakeResponse:
         pass
 
     def json(self):
-        return {"id": "C-1001"}
+        return {"id": "C-1001", "lookup_code": "blue-river-maple", "notes": ""}
 
 
 class FakeClient:
@@ -64,3 +64,19 @@ async def test_failed_call_link_is_retried_on_next_tool_call(monkeypatch):
     # once linked, further tool calls don't PATCH again
     await a.update_case(None, description="on Main St")
     assert len(linked_with) == 2
+
+
+@pytest.mark.asyncio
+async def test_lookup_code_is_withheld_until_the_description_is_saved(monkeypatch):
+    """Reading the code out early would hand it to a caller whose case is still half-filed, and
+    the whole point of the code is that it is spoken exactly once, at the end of intake."""
+    a = Assistant()
+    a.call_id = "CALL-7"
+    monkeypatch.setattr(mod.httpx, "AsyncClient", FakeClient)
+
+    assert "blue" not in await a.create_case(None, "Ana Ruiz", "555 010 2020")
+    assert a.lookup_code == "blue-river-maple"
+    assert "blue" not in await a.update_case(None, issue_type="pothole")
+    assert await a.update_case(None, description="on Main St") == (
+        "Updated case C-1001. Lookup code blue-river-maple"
+    )

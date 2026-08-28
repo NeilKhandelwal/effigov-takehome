@@ -242,6 +242,8 @@ export default function CaseDetailPage() {
                         "Case created"
                       ) : e.field === "call_linked" ? (
                         <>Linked {e.new_value}</>
+                      ) : e.field === "looked_up" ? (
+                        <>Looked up by {e.source}</>
                       ) : (
                         <>
                           <span className="text-slate-500">{humanize(e.field)}:</span>{" "}

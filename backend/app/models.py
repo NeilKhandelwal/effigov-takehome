@@ -34,6 +34,11 @@ class Case(BaseModel):
     updated_at: str
 
 
+class CaseCreated(Case):
+    # the only response that carries the code: after this it is write-only, compared but never shown
+    lookup_code: str
+
+
 class CallCreate(BaseModel):
     room: str | None = None
 

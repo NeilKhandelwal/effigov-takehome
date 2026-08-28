@@ -1,7 +1,7 @@
 """Insert 3 sample cases if the table is empty. Safe to re-run."""
 from datetime import datetime, timezone
 
-from app import db
+from app import codes, db
 
 SAMPLES = [
     ("Maria Lopez", "5551234567", "missed_pickup", "Trash not collected on Elm St Tuesday"),
@@ -16,10 +16,11 @@ def seed() -> None:
             print("cases table not empty, skipping seed")
         else:
             for sample in SAMPLES:
+                code = codes.new_code(conn)
                 cur = conn.execute(
-                    "INSERT INTO cases (name, phone, issue_type, description, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (*sample, ts, ts),
+                    "INSERT INTO cases (name, phone, issue_type, description, lookup_code, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (*sample, code, ts, ts),
                 )
                 # seeded cases get a 'created' audit row too, so their History isn't empty
                 conn.execute(
@@ -27,6 +28,8 @@ def seed() -> None:
                     "VALUES (?, 'created', NULL, ?, 'seed', ?)",
                     (db.case_id(cur.lastrowid), db.case_id(cur.lastrowid), ts),
                 )
+                # printed so a rehearsal can call in with a code that already exists
+                print(f"{db.case_id(cur.lastrowid)} {code}")
             print(f"seeded {len(SAMPLES)} cases")
 
 

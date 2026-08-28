@@ -114,7 +114,7 @@ export const listCallsByRoom = (room: string) =>
 export type CaseEvent = {
   id: number;
   case_id: string;
-  field: "created" | "status" | "notes" | "issue_type" | "description" | "call_linked";
+  field: "created" | "status" | "notes" | "issue_type" | "description" | "call_linked" | "looked_up";
   old_value: string | null;
   new_value: string | null;
   source: "voice" | "staff";
