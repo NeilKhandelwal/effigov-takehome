@@ -19,7 +19,7 @@ One narrow workflow, end to end:
          tables: cases · calls · transcript · case_events
 ```
 
-**Data model.** A *call* is not a *case*: one case can have many calls (the report, then the follow-up), and a lookup-only call shouldn't create a junk case. Transcript lines hang off the call; the call links to a case once the agent creates or finds one. Every case write appends a `case_events` row.
+**Data model.** A *call* is not a *case*: one case can have many calls (the report, then the follow-up), and a lookup-only call shouldn't create a junk case. Transcript lines hang off the call; the call links to a case once the agent creates or finds one. Every case *change* appends a `case_events` row (a PATCH that re-sends the same value writes nothing).
 
 **Real-time.** After every write the backend pushes `{"type": "case"|"call"|"transcript", "id": ...}` on `WS /ws`. The socket carries no payload; clients refetch what they're showing. Refetch is idempotent, so duplicate or out-of-order frames can't corrupt UI state. A 2-second poll stays on as a fallback.
 
@@ -63,19 +63,21 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 ## Known limitations
 
-- **STT mishears names** (Khandelwal → "Kendall Wall"). The agent now applies a spelled name, but the first attempt will often be wrong on the transcript.
+- **STT mishears names** (Khandelwal → "Kendall Wall"). The agent applies a spelled name, but the first attempt will often be wrong on the transcript.
 - `notes` is replace-on-write; the agent appends client-side (GET then PATCH). Two simultaneous note-writers would race. One agent, one staff user — acceptable here.
 - `PATCH /calls/{id}` re-links silently if `lookup_case` then `create_case` both run on one call; one call → one case is the model.
 - `case_events` has no rows for cases created before the table existed (the three seeded ones).
 - `db.connect()` connections are released by CPython refcounting, not closed explicitly. Fine for one process.
 - The home page does one `GET /calls/{id}` per active call on every refresh (N+1). N is 1 during a demo.
 - Console-mode transcripts have `room: "console"`; the `/call` page only shows browser calls.
+- A call whose worker dies mid-call stays `active` forever — there's no heartbeat or timeout; `reset_demo` is the only fix.
+- The nav opens its own WebSocket on every page just to drive the Live/Polling dot, so each page holds two sockets.
 - The dashboard's 2-second poll is still on as a fallback; the socket makes updates instant, the poll makes them certain.
 
 ## What I'd do next
 
 1. **Progressive case fields** — create the case as soon as name + phone + type are known and update description/status as the call goes on, so staff see fields change mid-call (their "issue type updates once confident" behaviour).
 2. **Warm transfer** — a `transfer_to_staff` tool that flips the call to `needs_person`, pushes it to the top of the live strip with the transcript, and tells the caller someone is picking up.
-3. **Evaluate the agent, not just run it** — hand-label 20 calls for issue type and "should have escalated", run them through the agent, and report accuracy including where it's wrong. That's the number a city would actually ask for.
+3. **Evaluate the agent, not just run it** — hand-label 20 calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
 4. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
 5. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
