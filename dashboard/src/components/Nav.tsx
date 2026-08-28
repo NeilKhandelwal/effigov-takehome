@@ -7,6 +7,7 @@ import { useLiveRefresh } from "@/lib/api";
 const LINKS = [
   { href: "/", label: "Cases" },
   { href: "/calls", label: "Calls" },
+  { href: "/call", label: "Start a call" },
 ];
 
 export default function Nav() {
@@ -22,7 +23,7 @@ export default function Nav() {
         </Link>
         <nav className="flex gap-1 text-sm">
           {LINKS.map((l) => {
-            const active = l.href === "/" ? path === "/" || path.startsWith("/cases") : path.startsWith(l.href);
+            const active = l.href === "/" ? path === "/" || path.startsWith("/cases") : path === l.href || path.startsWith(l.href + "/");
             return (
               <Link
                 key={l.href}
