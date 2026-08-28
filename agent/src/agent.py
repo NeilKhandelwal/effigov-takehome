@@ -293,9 +293,8 @@ async def city_services(ctx: JobContext):
             role = "user" if ev.item.role == "user" else "agent"
             spawn(post_line(agent.call_id, role, clean_text(ev.item.text_content or "")))
 
-    # shutdown callbacks are awaited by the job runner (a session "close" handler isn't),
-    # so the call is reliably marked ended even on Ctrl-C
-    # the summary runs inside the awaited callback so the process waits for it;
+    # shutdown callbacks are awaited by the job runner (a session "close" handler isn't), so the
+    # process waits for the summary and the call is reliably marked ended even on Ctrl-C;
     # end_call always runs, even when summarize fails
     async def on_shutdown():
         summary = await summarize(session)
