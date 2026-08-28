@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Case,
   CallWithTranscript,
@@ -29,27 +29,30 @@ export default function CallPage() {
   const [c, setCase] = useState<Tracked<Case>>(untracked);
   const [events, setEvents] = useState<CaseEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // The poll and the WS refresh can overlap; only the newest request may commit state,
+  // otherwise a slow older response would put a stale case beside a newer call.
+  const seq = useRef(0);
 
-  const load = useCallback(
-    () =>
-      getCall(id)
-        .then((data) => {
-          setCall(data);
-          setError(null);
-          // The linked case sits beside the transcript so staff see fields fill in as the agent learns them.
-          // Its events time the stepper: when the case was linked, what the agent changed mid-call.
-          if (!data.case_id) {
-            setEvents([]);
-            return setCase(untracked());
-          }
-          return Promise.all([getCase(data.case_id), getCaseEvents(data.case_id)]).then(([cs, evs]) => {
-            setCase((prev) => track(prev, cs));
-            setEvents(evs);
-          });
-        })
-        .catch((e: Error) => setError(e.message)),
-    [id],
-  );
+  const load = useCallback(() => {
+    const mine = ++seq.current;
+    return getCall(id)
+      .then(async (data) => {
+        // The linked case sits beside the transcript so staff see fields fill in as the agent learns them.
+        // Its events time the stepper: when the case was linked, what the agent changed mid-call.
+        // Events are decoration: if that fetch fails the case still renders.
+        const [cs, evs] = data.case_id
+          ? await Promise.all([getCase(data.case_id), getCaseEvents(data.case_id).catch(() => [] as CaseEvent[])])
+          : [null, []];
+        if (mine !== seq.current) return; // a newer load already committed
+        setCall(data);
+        setError(null);
+        setCase((prev) => (cs ? track(prev, cs) : untracked()));
+        setEvents(evs);
+      })
+      .catch((e: Error) => {
+        if (mine === seq.current) setError(e.message);
+      });
+  }, [id]);
 
   useEffect(() => {
     load();

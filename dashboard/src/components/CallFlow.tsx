@@ -8,7 +8,8 @@ type State = "done" | "current" | "pending" | "muted";
 type Step = { label: string; caption: string; state: State };
 
 // The agent writes the summary in its shutdown callback, a few seconds after ended_at.
-// Until that window passes a missing summary is "still coming", not "never written".
+// Until that window passes a missing summary is "still coming", not "never written" —
+// except for a call with no transcript, which the agent never summarizes at all.
 const SUMMARY_GRACE = 15000;
 
 const clock = (ts: string) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -67,7 +68,7 @@ export default function CallFlow({
     { label: "Ended", caption: duration(call.started_at, call.ended_at), state: active ? "current" : "done" },
     call.summary
       ? { label: "Summary", caption: "written", state: "done" }
-      : t - end < SUMMARY_GRACE
+      : turns && t - end < SUMMARY_GRACE
         ? { label: "Summary", caption: "", state: "pending" }
         : { label: "Summary", caption: "none", state: "muted" },
   ];
