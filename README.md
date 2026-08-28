@@ -6,10 +6,10 @@ A resident calls the City services line, a LiveKit voice agent files a service r
 
 One narrow workflow, end to end:
 
-1. Caller says "I want to report a pothole." The agent collects name and phone (confirmed by reading the digits back; partial numbers are refused) and opens the case right then. As it learns the issue type and a one-sentence description it fills them in with `update_case` — staff watch the fields change mid-call — and only then reads the case ID back.
+1. Caller says "I want to report a pothole." The agent collects name and phone (confirmed by reading the digits back; partial numbers are refused) and opens the case right then. As it learns the issue type and a one-sentence description it fills them in with `update_case` — staff watch the fields change mid-call — and only then reads the case ID back, followed by a three-word lookup code the caller will need to call back about it.
 2. The dashboard shows the call the moment it starts, streams the transcript line by line, and shows the new case at the top of the list — no refresh.
 3. Staff open the case, change its status, and see an audit trail of every change and who made it (`staff` vs `voice`).
-4. The caller rings back, gives their phone number, and the agent reads the current status from `lookup_case`.
+4. The caller rings back and says their three words — "blue, river, maple" — and only then does `lookup_case` read the current status back. The phone number is discovery; the code is authentication, so knowing a number or a case ID gets you nothing.
 
 ```
  mic ──► agent/  (LiveKit Agents, dev mode)            dashboard/ (Next.js) ◄── Chrome
@@ -42,7 +42,7 @@ cd agent && cp .env.example .env      # LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_
 uv sync && uv run python src/agent.py download-files   # once: turn-detector / VAD models
 uv run python src/agent.py dev
 ```
-Tests: `cd backend && uv run pytest` (21) and `cd agent && uv run pytest` (8; the LLM evals are deselected by default).
+Tests: `cd backend && uv run pytest` (27) and `cd agent && uv run pytest` (9; the LLM evals are deselected by default).
 
 Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
 
@@ -56,9 +56,10 @@ Built in the 3-hour window with Claude Code as pair: I set the API contract, dat
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/cases` | body `{name, phone, issue_type?, description}`; `issue_type` is null until classified |
+| `POST` | `/cases` | body `{name, phone, issue_type?, description}`; `issue_type` is null until classified. The only response that carries `lookup_code` |
 | `GET` | `/cases[?phone=]` | newest first; `phone` matches digits only |
 | `GET` / `PATCH` | `/cases/{id}` | PATCH any of `status`, `notes`, `issue_type`, `description`; header `X-Source` (`staff` default, agent sends `voice`) |
+| `GET` | `/cases/lookup?code=` | three spoken words (`blue river maple`, `Blue and River dash Maple`) → the case; 404 `no case for that code` for unknown *and* malformed; 5th wrong code on one `X-Call-Id` → 429 |
 | `GET` | `/cases/{id}/events` | audit log, oldest first |
 | `GET` | `/cases/{id}/calls` | that case's calls with transcripts |
 | `POST` / `GET` | `/calls[?status=&room=]` | a call record per voice session |
@@ -68,7 +69,7 @@ Built in the 3-hour window with Claude Code as pair: I set the API contract, dat
 | `GET` | `/health` | `{"ok": true}`; the dashboard uses it to show "Backend unreachable" |
 | `WS` | `/ws` | one `{type, id}` frame after every write; clients refetch |
 
-Agent tools (`agent/src/agent.py`): `create_case(name, phone)` · `update_case(issue_type?, description?)` · `lookup_case(phone? | case_id?)` · `add_note(case_id, note)` · `transfer_to_staff(reason)` · `end_call()`.
+Agent tools (`agent/src/agent.py`): `create_case(name, phone)` · `update_case(issue_type?, description?)` · `lookup_case(code)` · `add_note(note)` · `transfer_to_staff(reason)` · `end_call()`.
 
 ## What I cut and why
 
@@ -84,7 +85,10 @@ The rule was one narrow workflow, working, over surface area. The big ones:
 ## Known limitations
 
 - `notes` is replace-on-write; the agent appends client-side (GET then PATCH). Two simultaneous note-writers would race. One agent, one staff user — acceptable here.
-- `PATCH /calls/{id}` re-links silently if `lookup_case` then `create_case` both run on one call; one call → one case is the model.
+- Lookup codes are stored in plaintext, so anyone with database or dashboard access can read one. A caller who has lost their code has no self-service path: staff verify them another way and read it out of the DB.
+- Cases filed before the code column existed (the seeded three are regenerated, older rows are not) have `lookup_code = NULL` and cannot be reached by voice at all.
+- The wrong-code counter is a module-level dict keyed by call id: single process, cleared on restart, and a caller who guesses wrong five times can still get in with the right code afterwards. It slows guessing on one call, it is not a real rate limiter.
+- One call → one case: `lookup_case` claims the call the same way `create_case` does, so a caller who looks up an old case and then wants to file a new one has to call back.
 - `case_events` has no rows for cases created before the table existed (the three seeded ones).
 - `db.connect()` connections are released by CPython refcounting, not closed explicitly. Fine for one process.
 - The home page does one `GET /calls/{id}` per active call on every refresh (N+1). N is 1 during a demo.
