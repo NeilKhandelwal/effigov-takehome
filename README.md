@@ -63,7 +63,6 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 ## Known limitations
 
-- **STT mishears names** (Khandelwal → "Kendall Wall"). The agent applies a spelled name, but the first attempt will often be wrong on the transcript.
 - `notes` is replace-on-write; the agent appends client-side (GET then PATCH). Two simultaneous note-writers would race. One agent, one staff user — acceptable here.
 - `PATCH /calls/{id}` re-links silently if `lookup_case` then `create_case` both run on one call; one call → one case is the model.
 - `case_events` has no rows for cases created before the table existed (the three seeded ones).
