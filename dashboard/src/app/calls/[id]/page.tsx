@@ -76,7 +76,7 @@ export default function CallPage() {
       {call && (
         <div className="grid md:grid-cols-3 gap-4">
           <section className="md:col-span-2">
-            <Transcript lines={call.transcript} className="max-h-[70vh] min-h-64" />
+            <Transcript lines={call.transcript} className="max-h-[70vh] min-h-64" active={active} />
           </section>
 
           <aside className="rounded-lg border border-slate-200 bg-white shadow-sm p-4 text-sm h-fit">
