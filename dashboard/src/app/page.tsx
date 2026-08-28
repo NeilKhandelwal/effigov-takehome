@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Case,
   CallWithTranscript,
+  ISSUE_TYPES,
   STATUSES,
   STATUS_COLOR,
   Status,
@@ -28,6 +29,7 @@ export default function CasesPage() {
   const [refreshedAt, setRefreshedAt] = useState("");
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Status | "all">("all");
+  const [issue, setIssue] = useState("all");
 
   const load = useCallback(() => {
     listCases()
@@ -59,6 +61,7 @@ export default function CasesPage() {
   const shown = rows.filter(
     (c) =>
       (filter === "all" || c.status === filter) &&
+      (issue === "all" || c.issue_type === issue) &&
       (!needle || [c.id, c.name, c.phone, c.issue_type, c.description].join(" ").toLowerCase().includes(needle)),
   );
 
@@ -141,6 +144,18 @@ export default function CasesPage() {
           placeholder="Search id, name, phone, description…"
           className="flex-1 min-w-60 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
         />
+        <select
+          value={issue}
+          onChange={(e) => setIssue(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+        >
+          <option value="all">All types</option>
+          {ISSUE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {humanize(t)}
+            </option>
+          ))}
+        </select>
         {(["all", ...STATUSES] as const).map((s) => (
           <button
             key={s}
