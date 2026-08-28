@@ -144,6 +144,28 @@ SCENARIOS = [
         ["Hi there.", "How much is a dog licence and where do I buy one?"],
         {"must_not": CASE_TOOLS},
     ),
+    # --- added after warm transfer (#15), end_call, nullable issue_type (5b968fd) ---
+    (
+        "asking for a person transfers and keeps the line open",
+        ["I don't want to talk to a robot. Put me through to a real person about my water bill."],
+        {"must": [("transfer_to_staff", None)], "must_not": ("end_call", *CASE_TOOLS)},
+    ),
+    (
+        "goodbye after a filed request ends the call",
+        [*NAME_PHONE, "There's a pothole on Elm Street.", "About a foot wide by the curb.",
+         "No, that's everything. Thanks, bye."],
+        {"must": [("create_case", None), ("end_call", None)], "must_not": ("transfer_to_staff",)},
+    ),
+    (
+        "case opened at name and phone has no issue type yet",
+        NAME_PHONE,
+        {"must": [("create_case", None)], "must_not": ("update_case",), "db_unclassified": True},
+    ),
+    (
+        "lookup reads the case status back to the caller",
+        ["Any update on my case? My number is 925-915-7062."],
+        {"must": [("lookup_case", None)], "seed_case": "C-1001", "reply_contains": "open"},
+    ),
 ]
 
 
@@ -202,6 +224,17 @@ def calls_of(results):
     return [tuple(c) for c in out]
 
 
+def replies_of(results):
+    """Every assistant message the agent produced, in order (what the caller would hear)."""
+    out = []
+    for r in results:
+        for ev in r.events:
+            item = getattr(ev, "item", None)
+            if ev.type == "message" and getattr(item, "role", None) == "assistant":
+                out.append(item.text_content or "")
+    return out
+
+
 def check(calls, expected):
     """Turn a hand-labelled expectation into asserts with messages that name the miss."""
     seen = [(n, a) for n, a, _ in calls]
@@ -252,7 +285,7 @@ async def test_scenario(name, turns, expected, backend):
     style difference, so these must fail when the agent stops behaving that way.
     """
     http = sync_client(backend)
-    if expected.get("note_on"):
+    if expected.get("note_on") or expected.get("seed_case"):
         # a note needs a case to hang off; seed it through the backend's own endpoint
         seeded = http.post(
             "/cases",
@@ -263,7 +296,8 @@ async def test_scenario(name, turns, expected, backend):
                 "description": "Pothole on Elm St",
             },
         )
-        assert seeded.status_code == 201 and seeded.json()["id"] == expected["note_on"]
+        want = expected.get("note_on") or expected["seed_case"]
+        assert seeded.status_code == 201 and seeded.json()["id"] == want
 
     results = await run_scenario(turns)
     calls = calls_of(results)
@@ -279,3 +313,10 @@ async def test_scenario(name, turns, expected, backend):
     if expected.get("note_on"):
         notes = http.get(f"/cases/{expected['note_on']}").json()["notes"]
         assert notes.strip(), f"add_note left {expected['note_on']} without notes; calls: {calls}"
+    if expected.get("db_unclassified"):
+        # nullable issue_type: a case opened at name+phone must be stored as "not classified yet"
+        stored = http.get("/cases").json()
+        assert len(stored) == 1 and stored[0]["issue_type"] is None, f"expected one unclassified case; got {stored}"
+    if expected.get("reply_contains"):
+        said = " ".join(replies_of(results)).lower()
+        assert expected["reply_contains"] in said, f"agent never said {expected['reply_contains']!r}; said: {said!r}"

@@ -48,13 +48,28 @@ Terminal-only alternative for the voice side: `uv run python src/agent.py consol
 
 Reset to a clean demo state at any time (do it right before a demo): `cd backend && uv run python -m scripts.reset_demo` — wipes all tables, reseeds the 3 cases.
 
-Built in the 3-hour window with Claude Code as pair: I set the contract, data model, and every design decision (see `DECISIONS.md`); agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one. Scaffolding came from outside the window: `agent/` from LiveKit's [`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python), `dashboard/` from `create-next-app`, and `backend/` from my own FastAPI + uv project template (layout and tooling only). All application code — endpoints, data model, WebSocket, agent tools and prompt, every dashboard page — was written during the 3 hours.
+Built in the 3-hour window with Claude Code as pair: I set the API contract, data model, and every design decision; agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one. Scaffolding came from outside the window: `agent/` from LiveKit's [`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python), `dashboard/` from `create-next-app`, and `backend/` from my own FastAPI + uv project template (layout and tooling only). All application code — endpoints, data model, WebSocket, agent tools and prompt, every dashboard page — was written during the 3 hours.
 
-`CONTRACT.md` is the API contract all three parts were built against; `DECISIONS.md` is the timestamped tradeoff log.
+## API (FastAPI, `backend/app/main.py`)
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/cases` | body `{name, phone, issue_type?, description}`; `issue_type` is null until classified |
+| `GET` | `/cases[?phone=]` | newest first; `phone` matches digits only |
+| `GET` / `PATCH` | `/cases/{id}` | PATCH any of `status`, `notes`, `issue_type`, `description`; header `X-Source` (`staff` default, agent sends `voice`) |
+| `GET` | `/cases/{id}/events` | audit log, oldest first |
+| `GET` | `/cases/{id}/calls` | that case's calls with transcripts |
+| `POST` / `GET` | `/calls[?status=&room=]` | a call record per voice session |
+| `GET` / `PATCH` | `/calls/{id}` | PATCH `status` (`active` \| `needs_person` \| `ended`), `case_id`, `summary`, `transfer_reason` |
+| `POST` | `/calls/{id}/transcript` | `{role: user\|agent, text}` |
+| `GET` | `/token?identity=` | LiveKit join token + a fresh room name for the browser call |
+| `WS` | `/ws` | one `{type, id}` frame after every write; clients refetch |
+
+Agent tools (`agent/src/agent.py`): `create_case(name, phone)` · `update_case(issue_type?, description?)` · `lookup_case(phone? | case_id?)` · `add_note(case_id, note)` · `transfer_to_staff(reason)` · `end_call()`.
 
 ## What I cut and why
 
-The rule was one narrow workflow, working, over surface area. Timestamped log in `DECISIONS.md`. The big ones:
+The rule was one narrow workflow, working, over surface area. The big ones:
 
 - **No deployment, no Docker.** The brief says localhost three times. Three processes plus cross-origin WebSockets is exactly where a demo breaks at the last minute.
 - **One case table, stdlib `sqlite3`, no ORM.** ~12 SQL statements in the whole project; an ORM would be the third abstraction before the second use.
@@ -82,8 +97,10 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 ## What I'd do next
 
-1. **Evaluate the agent on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
-2. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
-3. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
-4. **Notes as events** — drop the `notes` column, write each note as a `case_events` row. Kills the GET-then-PATCH race in `add_note` and gives every note its own provenance (~30 min: contract, agent tool, dashboard textarea move together).
-5. **Real references** — row-id foreign keys with `PRAGMA foreign_keys=ON`, and a `call_cases` join table so a re-linked call keeps both cases. Nullable `issue_type` (null until classified) is on the `fix/data-model` branch, unmerged: it relaxes a NOT NULL that can't be retrofitted without rebuilding the DB.
+1. **Transcript tagging and filtering** — after each call, have the summary step also emit tags (topic, sentiment, "resident wants a callback", "wrong department") as structured output onto the call; filter the dashboard by tag, not just status. The pieces exist: the summary already runs an LLM over the transcript, and the filters strip already reads call fields.
+2. **Multilingual** — LiveKit's STT/TTS take a language; detect it from the first utterance (or the caller's choice on the greeting), set it on the session, and let the prompt answer in kind while tools keep writing English into the case. EffiGov advertises 30+ languages; this is the cheapest version of that.
+3. **Supervisor agent** — a background check on each agent answer against an approved knowledge base (hours, fees, addresses): flag a wrong answer in the transcript, inject the correction, or trigger `transfer_to_staff`. The event hooks and `needs_person` state it needs are already in place; the knowledge base isn't.
+4. **Finish the warm transfer** — a staff token and a `/staff/join` page so a person actually enters the room and the agent mutes; today the call is flagged, the transcript is live, but nobody picks up.
+5. **Evaluate on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", and report containment (resolved with no human) alongside accuracy. The scenario suite is the offline version of this.
+6. **Notes as events** — drop the `notes` column; each note becomes a `case_events` row with its own provenance, killing the GET-then-PATCH race in `add_note`.
+7. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.

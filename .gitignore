@@ -10,3 +10,5 @@ CLAUDE.md
 .DS_Store
 agent/console.log
 agent/worker.log
+CONTRACT.md
+DECISIONS.md
