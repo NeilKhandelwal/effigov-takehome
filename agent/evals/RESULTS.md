@@ -80,3 +80,29 @@ implies also happened, so a green row means a case (or note) really exists.
 ## Re-run after the prompt fixes (14:20, commit 3285bf1 on main via PR #2)
 
 14/15. `lookup_by_phone` and `spelled_case_id` now pass. Remaining miss: `loud_neighbours_falls_back_to_other` — the agent opened the case but did not call `update_case(issue_type="other")` within the scenario's turn budget. One run; not re-rolled.
+
+## Third run — 19 scenarios, 15:08 (main 5b968fd + four new scenarios)
+
+**19/19**, 104 s wall clock, one run, not re-rolled.
+
+Four scenarios added for features shipped after the first run:
+
+| # | Scenario | Expected | Got | Pass |
+|---|---|---|---|---|
+| 16 | asking for a person transfers and keeps the line open | `transfer_to_staff`; never `end_call` or a case tool | as expected | ✅ |
+| 17 | goodbye after a filed request ends the call | `create_case` … then `end_call`; never `transfer_to_staff` | as expected | ✅ |
+| 18 | case opened at name and phone has no issue type yet | `create_case`, no `update_case`; DB row has `issue_type: null` | as expected | ✅ |
+| 19 | lookup reads the case status back to the caller | `lookup_case` on the seeded C-1001; the agent's reply contains "open" | as expected | ✅ |
+
+Scenarios 1–15 unchanged and all passing on this run, including "loud neighbours → other" (the
+second run's miss) and "water main leak → water" (the first run's).
+
+Two harness additions: `replies_of()` collects the agent's spoken replies so a scenario can assert
+what the caller would *hear*, not only which tool fired (#19); `db_unclassified` reads the case
+back to prove the null landed (#18).
+
+**Regression found and fixed by this run:** commit `2f47aed` added `tests/conftest.py` with
+`os.environ.setdefault("LIVEKIT_API_KEY", "test")` so unit tests pass on a keyless clone. It ran
+before `agent.py`'s `load_dotenv`, which does not override existing variables, so every eval hit
+LiveKit Inference with the key `"test"` → 401 on all 19. Fix: conftest loads `agent/.env` first,
+then applies the dummies. `uv run pytest` (unit) still passes without keys.

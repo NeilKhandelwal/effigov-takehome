@@ -25,14 +25,14 @@ One narrow workflow, end to end:
 
 **Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Six function tools: `create_case`, `update_case`, `lookup_case`, `add_note`, `transfer_to_staff` (flags the call `needs_person` and keeps the line open for staff), `end_call`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
 
-**Does the agent actually work?** `agent/tests/test_scenarios.py` runs 15 hand-labelled scenarios through the real agent and backend and checks which tools it called with what. Score on the shipped prompt: **14/15** on one run — the miss is a "loud neighbours" call the agent opened but never classified as `other` within the scenario's turn budget. Run with `cd agent && uv run pytest -m eval` (LLM calls; deselected by default). The first run and the two failures it found are written up in [agent/evals/RESULTS.md](agent/evals/RESULTS.md).
+**Does the agent actually work?** `agent/tests/test_scenarios.py` runs 19 hand-labelled scenarios through the real agent and backend and checks which tools it called with what — and, where it matters, what the caller would hear and what landed in the DB. Three runs, all recorded in [agent/evals/RESULTS.md](agent/evals/RESULTS.md): **12/15** on the first prompt, **14/15** after fixing the two misses it found, **19/19** after adding scenarios for warm transfer, `end_call`, and null-until-classified. Single runs, not re-rolled. `cd agent && uv run pytest -m eval` (LLM calls; deselected by default).
 
-## Run (three terminals)
+## Run (three terminals — each block starts at the repo root)
 
-**Prereqs:** [uv](https://docs.astral.sh/uv/) (installs Python 3.13 itself), Node 20+, and a LiveKit Cloud project for the `LIVEKIT_*` keys (Settings → Keys). Without the keys, everything except the voice call works.
+**Prereqs:** [uv](https://docs.astral.sh/uv/) (installs Python 3.13 itself), Node 20.9+, and a LiveKit Cloud project for the `LIVEKIT_*` keys (Settings → Keys). Without the keys, everything except the voice call works.
 
 ```sh
-# 1. backend (http://localhost:8000, SQLite file backend/cases.db)
+# 1. backend (http://localhost:8000, SQLite file backend/cases.db — override with CASES_DB=<path>)
 cd backend && cp .env.example .env    # LIVEKIT_* (needed only for the browser call's /token)
 uv sync && uv run python -m scripts.seed && uv run uvicorn app.main:app --reload --port 8000
 # 2. dashboard (http://localhost:3000 — open it at localhost, not 127.0.0.1, for CORS; backend URL is hardcoded in src/lib/api.ts)
@@ -42,13 +42,15 @@ cd agent && cp .env.example .env      # LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_
 uv sync && uv run python src/agent.py download-files   # once: turn-detector / VAD models
 uv run python src/agent.py dev
 ```
+Tests: `cd backend && uv run pytest` (21) and `cd agent && uv run pytest` (8; the LLM evals are deselected by default).
+
 Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
 
 Terminal-only alternative for the voice side: `uv run python src/agent.py console` talks through your mic with no browser.
 
 Reset to a clean demo state at any time (do it right before a demo): `cd backend && uv run python -m scripts.reset_demo` — wipes all tables, reseeds the 3 cases.
 
-Built in the 3-hour window with Claude Code as pair: I set the API contract, data model, and every design decision; agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one. Scaffolding came from outside the window: `agent/` from LiveKit's [`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python), `dashboard/` from `create-next-app`, and `backend/` from my own FastAPI + uv project template (layout and tooling only). All application code — endpoints, data model, WebSocket, agent tools and prompt, every dashboard page — was written during the 3 hours.
+Built in the 3-hour window with Claude Code as pair: I set the API contract, data model, and every design decision; agents executed lanes against a written API contract in parallel and I reviewed, tested, and committed each one. Scaffolding came from outside the window: `agent/` from LiveKit's [`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python), `dashboard/` from `create-next-app`, and `backend/` from my own FastAPI + uv project template (layout and tooling only). All application code — endpoints, data model, WebSocket, agent tools and prompt, every dashboard page — was written during the 3 hours.
 
 ## API (FastAPI, `backend/app/main.py`)
 
@@ -63,6 +65,7 @@ Built in the 3-hour window with Claude Code as pair: I set the API contract, dat
 | `GET` / `PATCH` | `/calls/{id}` | PATCH `status` (`active` \| `needs_person` \| `ended`), `case_id`, `summary`, `transfer_reason` |
 | `POST` | `/calls/{id}/transcript` | `{role: user\|agent, text}` |
 | `GET` | `/token?identity=` | LiveKit join token + a fresh room name for the browser call |
+| `GET` | `/health` | `{"ok": true}`; the dashboard uses it to show "Backend unreachable" |
 | `WS` | `/ws` | one `{type, id}` frame after every write; clients refetch |
 
 Agent tools (`agent/src/agent.py`): `create_case(name, phone)` · `update_case(issue_type?, description?)` · `lookup_case(phone? | case_id?)` · `add_note(case_id, note)` · `transfer_to_staff(reason)` · `end_call()`.
