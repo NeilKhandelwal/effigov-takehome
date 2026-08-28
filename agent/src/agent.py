@@ -30,6 +30,7 @@ load_dotenv(".env")
 BACKEND = os.environ.get("BACKEND_URL", "http://localhost:8000")
 BACKEND_DOWN = "I couldn't reach the case system right now, please try again later."
 ISSUE_TYPES = "missed_pickup, pothole, streetlight, water, animal, other"
+HEADERS = {"X-Source": "voice"}  # audit log attributes these writes to the voice agent
 
 
 def digits(phone: str) -> str:
@@ -45,7 +46,7 @@ def clean_text(text: str) -> str:
 # every helper then no-ops, so the voice call keeps working without the dashboard.
 async def start_call() -> str | None:
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, headers=HEADERS) as client:
             r = await client.post(f"{BACKEND}/calls", json={})
             r.raise_for_status()
             return r.json()["id"]
@@ -58,7 +59,7 @@ async def post_line(call_id: str | None, role: str, text: str) -> None:
     if call_id is None or not text:
         return
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, headers=HEADERS) as client:
             r = await client.post(
                 f"{BACKEND}/calls/{call_id}/transcript", json={"role": role, "text": text}
             )
@@ -71,7 +72,7 @@ async def patch_call(call_id: str | None, body: dict) -> None:
     if call_id is None:
         return
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, headers=HEADERS) as client:
             r = await client.patch(f"{BACKEND}/calls/{call_id}", json=body)
             r.raise_for_status()
     except Exception:
@@ -136,7 +137,7 @@ class Assistant(Agent):
             "description": description,
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.post(f"{BACKEND}/cases", json=body)
                 r.raise_for_status()
                 case_id = r.json()["id"]
@@ -154,7 +155,7 @@ class Assistant(Agent):
             phone: caller's phone number
         """
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.get(f"{BACKEND}/cases", params={"phone": digits(phone)})
                 r.raise_for_status()
                 cases = r.json()
@@ -182,7 +183,7 @@ class Assistant(Agent):
         if not case_id.startswith("C-"):  # caller may say "1001" or "c 1001"
             case_id = "C-" + digits(case_id)
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.get(f"{BACKEND}/cases/{case_id}")
                 if r.status_code == 404:
                     return f"No case found with ID {case_id}."
