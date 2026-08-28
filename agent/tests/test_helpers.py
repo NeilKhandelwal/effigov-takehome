@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from agent import clean_text, digits, normalize_case_id, valid_phone
+from agent import clean_text, digits, normalize_code, valid_phone
 
 
 def test_clean_text_strips_expressive_tags():
@@ -30,9 +30,10 @@ def test_valid_phone_rejects_partial_numbers():
     assert not valid_phone("1 925 915 7062 3")
 
 
-def test_normalize_case_id_accepts_spoken_forms():
-    """Callers say the ID in pieces; lookup and add_note must agree on what it means."""
-    assert normalize_case_id("C-1001") == "C-1001"
-    assert normalize_case_id("c 1001") == "C-1001"
-    assert normalize_case_id("1001") == "C-1001"
-    assert normalize_case_id(" c-1001 ") == "C-1001"
+def test_normalize_code_accepts_spoken_forms():
+    """The code is the only key to a case: a caller who says it right must never be turned away
+    over punctuation or the filler words people put between spoken words."""
+    assert normalize_code("Blue River, Maple") == "blue-river-maple"
+    assert normalize_code("blue and river dash maple") == "blue-river-maple"
+    assert normalize_code(" BLUE  river   maple ") == "blue-river-maple"
+    assert normalize_code("blue-river-maple") == "blue-river-maple"

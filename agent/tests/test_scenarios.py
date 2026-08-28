@@ -119,18 +119,20 @@ SCENARIOS = [
         },
     ),
     (
-        "lookup by phone uses the digits the caller gave",
-        ["Can you check on my case? My number is 925-915-7062."],
+        "correct lookup code finds the case and reads its status back",
+        ["Can you check on my case? My code is {code}."],
         {
-            "must": [("lookup_case", lambda a: digits(a.get("phone", "")) == "9259157062")],
+            "must": [("lookup_case", None)],
             "must_not": ("create_case",),
+            "seed_case": "C-1001",
+            "reply_contains": "open",
         },
     ),
     (
-        "spelled-out case id normalises to C-1001",
-        ["Please add a note to case c one zero zero one.", "The pothole got bigger."],
+        "note lands on the case the code found",
+        ["I need to add something to my case. The code is {code}.", "The pothole got bigger."],
         {
-            "must": [("add_note", None)],
+            "must": [("lookup_case", None), ("add_note", None)],
             "note_on": "C-1001",
         },
     ),
@@ -162,9 +164,10 @@ SCENARIOS = [
         {"must": [("create_case", None)], "must_not": ("update_case",), "db_unclassified": True},
     ),
     (
-        "lookup reads the case status back to the caller",
-        ["Any update on my case? My number is 925-915-7062."],
-        {"must": [("lookup_case", None)], "seed_case": "C-1001", "reply_contains": "open"},
+        "three wrong codes hand the caller to staff instead of the case",
+        ["Any update on my case? The code is stone cloud river.",
+         "Maybe it was cloud stone river.", "Try river stone cloud then."],
+        {"must": [("lookup_case", None), ("transfer_to_staff", None)]},
     ),
 ]
 
@@ -298,6 +301,8 @@ async def test_scenario(name, turns, expected, backend):
         )
         want = expected.get("note_on") or expected["seed_case"]
         assert seeded.status_code == 201 and seeded.json()["id"] == want
+        # the code is freshly generated per run, so the turns carry a {code} placeholder
+        turns = [t.format(code=seeded.json()["lookup_code"].replace("-", " ")) for t in turns]
 
     results = await run_scenario(turns)
     calls = calls_of(results)

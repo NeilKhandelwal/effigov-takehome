@@ -49,16 +49,11 @@ def valid_phone(phone: str) -> bool:
     return len(digits(phone)) == 10
 
 
-def normalize_case_id(spoken: str) -> str:
-    # callers say "1001", "c 1001" or "c one zero zero one" (the LLM turns words into digits)
-    spoken = spoken.strip().upper()
-    return spoken if spoken.startswith("C-") else "C-" + digits(spoken)
-
-
-def describe_case(c: dict) -> str:
-    # one line per case, so the agent can read a short list back
-    issue = c["issue_type"] or "not yet classified"  # null until the agent classifies it
-    return f"{c['id']}, {issue}, status {c['status']}, filed {c['created_at'][:10]}"
+def normalize_code(spoken: str) -> str:
+    # "Blue River, Maple" and "blue and river dash maple" are both blue-river-maple
+    # (same rule as the backend's codes.normalize; the backend is still the one that matches)
+    words = [w for w in re.split(r"[\s,-]+", spoken.strip().lower()) if w and w not in ("and", "dash")]
+    return "-".join(words)
 
 
 def clean_text(text: str) -> str:
@@ -152,8 +147,8 @@ class Assistant(Agent):
             instructions=textwrap.dedent(
                 f"""\
                 You are the City services phone line. You only do three things: file a new
-                service request, look up an existing case by phone number, or add a note to a
-                case. Politely decline anything else.
+                service request, look up an existing case from its lookup code, or add a note to
+                a case. Politely decline anything else.
 
                 To file a request, collect one at a time: the caller's name, then their phone
                 number. If the caller spells their name letter by letter, use exactly the
@@ -165,18 +160,19 @@ class Assistant(Agent):
                 for a one-sentence description and call update_case with the description. Do
                 not ask the caller to confirm the name, issue type, or description; just move
                 on. Only after the description is saved, read the case ID back slowly,
-                character by character.
+                character by character, then say "Your lookup code is <word>, <word>, <word>.
+                Say it on your next call to check on this case." Read the three words with a
+                comma between them so they land one at a time, and offer once to repeat them.
+                Never say the lookup code before the description has been saved.
 
-                If the caller asks about an existing case, call lookup_case right away with
-                any phone number they have said on this call, including one said in the same
-                sentence as the request; only ask for it if you have none. To add a note, call
-                add_note as soon as you have a case ID and the note's wording, even if the ID
-                was spoken as words ("c one zero zero one" is C-1001); don't ask for the note
-                again. When you find a case, always tell the caller its current status in
-                plain words (open, in progress, or resolved) before anything else about it.
-                If lookup_case returns several cases, read the short list and ask which one
-                they mean, then call lookup_case again with that case ID; a case ID the caller
-                states always wins over the phone number.
+                If the caller asks about an existing case, ask for their lookup code (three
+                words) and call lookup_case. Do not look up cases by phone number or case ID.
+                If three codes in a row do not match, call transfer_to_staff with the reason
+                "could not verify lookup code". To add a note, call add_note with just the
+                note's wording; it goes on the case found or opened on this call, so look the
+                case up first and don't ask for the note again. When you find a case, always
+                tell the caller its current status in plain words (open, in progress, or
+                resolved) before anything else about it.
 
                 This is a voice call: plain text only, one or two short sentences per reply,
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
@@ -194,6 +190,7 @@ class Assistant(Agent):
         # the case this call created (one Assistant per job, so no reset needed);
         # update_case uses it so the LLM never has to repeat the ID
         self.case_id: str | None = None
+        self.lookup_code: str | None = None  # spoken back once the description is saved
         self.call_linked = False  # PATCH /calls/{id} case_id succeeded; retried until it does
 
     async def _link_call(self) -> None:
@@ -223,7 +220,9 @@ class Assistant(Agent):
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.post(f"{BACKEND}/cases", json=body)
                 r.raise_for_status()
-                case_id = r.json()["id"]
+                created = r.json()
+                case_id = created["id"]
+                self.lookup_code = created["lookup_code"]  # the only response that carries it
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("create_case failed")
             return BACKEND_DOWN
@@ -264,72 +263,57 @@ class Assistant(Agent):
             logger.exception("update_case failed")
             return BACKEND_DOWN
         await self._link_call()
+        if description is not None and self.lookup_code:
+            # withheld until now so the agent can't read it out before the case is filled in
+            return f"Updated case {self.case_id}. Lookup code {self.lookup_code}"
         return f"Updated case {self.case_id}"
 
     @function_tool
-    async def lookup_case(
-        self,
-        context: RunContext,
-        phone: str | None = None,
-        case_id: str | None = None,
-    ) -> str:
-        """Find a case by case ID, or the cases filed under a phone number.
+    async def lookup_case(self, context: RunContext, code: str) -> str:
+        """Find the caller's case from the three-word lookup code they were given when it was
+        filed. This is the only way to reach an existing case; a phone number or case ID is not
+        enough.
 
         Args:
-            phone: caller's phone number (lists every case under it, newest first)
-            case_id: the case ID, like C-1001; wins over phone when the caller states one
+            code: the three words the caller says, like "blue river maple"
         """
-        if not phone and not case_id:
-            return "I need a phone number or a case ID to look up."
+        headers = {**HEADERS, "X-Call-Id": self.call_id or ""}  # backend counts wrong codes per call
         try:
-            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
-                if case_id:
-                    case_id = normalize_case_id(case_id)
-                    r = await client.get(f"{BACKEND}/cases/{case_id}")
-                    if r.status_code == 404:
-                        return f"No case found with ID {case_id}."
-                    r.raise_for_status()
-                    cases = [r.json()]
-                else:
-                    r = await client.get(f"{BACKEND}/cases", params={"phone": digits(phone or "")})
-                    r.raise_for_status()
-                    cases = r.json()  # backend returns newest first
-        except Exception:
+            async with httpx.AsyncClient(timeout=10, headers=headers) as client:
+                r = await client.get(f"{BACKEND}/cases/lookup", params={"code": normalize_code(code)})
+                if r.status_code == 404:
+                    return "No case matches that code."
+                if r.status_code == 429:
+                    return "Too many attempts."
+                r.raise_for_status()
+                c = r.json()
+        except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("lookup_case failed")
             return BACKEND_DOWN
-        if not cases:
-            return "No case found for that number."
-        if len(cases) > 1:
-            # don't guess which one they mean, and don't link the call until they pick
-            shown = cases[:3]
-            more = f" and {len(cases) - 3} older" if len(cases) > 3 else ""
-            return f"{len(cases)} cases under that number{more}: " + "; ".join(describe_case(c) for c in shown)
-        c = cases[0]
-        await patch_call(self.call_id, {"case_id": c["id"]})  # link live call to its case
+        self.case_id = c["id"]  # add_note works off this, so a note needs a verified case first
+        await self._link_call()
         issue = c["issue_type"] or "not yet classified"
-        # no filed-date here: it's read aloud on every single-case lookup
+        # no filed-date here: it's read aloud on every lookup
         return f"Case {c['id']}, {issue}, status {c['status']}, description {c['description']}"
 
     @function_tool
-    async def add_note(self, context: RunContext, case_id: str, note: str) -> str:
-        """Append a note to an existing case.
+    async def add_note(self, context: RunContext, note: str) -> str:
+        """Append a note to the case opened or looked up on this call.
 
         Args:
-            case_id: the case ID, like C-1001
             note: the note to add
         """
-        case_id = normalize_case_id(case_id)
+        if not self.case_id:
+            return "No case on this call yet; ask for the three-word lookup code and call lookup_case."
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
-                r = await client.get(f"{BACKEND}/cases/{case_id}")
-                if r.status_code == 404:
-                    return f"No case found with ID {case_id}."
+                r = await client.get(f"{BACKEND}/cases/{self.case_id}")
                 r.raise_for_status()
                 # PATCH notes replaces the field, so append client-side (per CONTRACT.md)
                 notes = (r.json()["notes"] + "\n" + note).strip()
-                r = await client.patch(f"{BACKEND}/cases/{case_id}", json={"notes": notes})
+                r = await client.patch(f"{BACKEND}/cases/{self.case_id}", json={"notes": notes})
                 r.raise_for_status()
-                return f"Note added to case {case_id}"
+                return f"Note added to case {self.case_id}"
         except Exception:
             logger.exception("add_note failed")
             return BACKEND_DOWN
