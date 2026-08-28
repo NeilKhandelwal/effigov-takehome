@@ -169,6 +169,23 @@ SCENARIOS = [
          "Maybe it was cloud stone river.", "Try river stone cloud then."],
         {"must": [("lookup_case", None), ("transfer_to_staff", None)]},
     ),
+    # --- added after the freeze: one call, many cases ---
+    (
+        "two separate problems in one call open two cases",
+        [*NAME_PHONE, "There's a huge pothole on Elm Street.", "It's about a foot wide near the curb.",
+         "Also, my trash wasn't collected on Tuesday.", "They skipped the whole street."],
+        {
+            "must": [("create_case", None), issue("pothole"),
+                     ("create_case", None), issue("missed_pickup")],
+            "db_cases": 2,
+        },
+    ),
+    (
+        "the same problem restated stays one case",
+        [*NAME_PHONE, "There's a huge pothole on Elm Street.", "It's about a foot wide near the curb.",
+         "Like I said, that pothole on Elm Street is really bad."],
+        {"must": [("create_case", None), issue("pothole")], "db_cases": 1},
+    ),
 ]
 
 
@@ -311,6 +328,12 @@ async def test_scenario(name, turns, expected, backend):
     if expected.get("db_empty"):
         assert http.get("/cases").json() == [], (
             f"a refused phone number must leave no case behind; tool calls: {calls}"
+        )
+    if "db_cases" in expected:
+        # one problem per case: a second problem must open a second case, a restated one must not
+        stored = http.get("/cases").json()
+        assert len(stored) == expected["db_cases"], (
+            f"expected {expected['db_cases']} case(s), got {[c['id'] for c in stored]}; tool calls: {calls}"
         )
     if expected.get("db_phone"):
         stored = http.get("/cases", params={"phone": expected["db_phone"]}).json()

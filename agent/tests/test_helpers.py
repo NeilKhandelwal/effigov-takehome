@@ -1,9 +1,9 @@
-"""The two pure helpers the transcript and case data depend on."""
+"""The pure helpers the transcript, case data and the one-problem-per-case rule depend on."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from agent import clean_text, digits, normalize_code, valid_phone
+from agent import can_open_case, clean_text, digits, normalize_code, valid_phone
 
 
 def test_clean_text_strips_expressive_tags():
@@ -37,3 +37,15 @@ def test_normalize_code_accepts_spoken_forms():
     assert normalize_code("blue and river dash maple") == "blue-river-maple"
     assert normalize_code(" BLUE  river   maple ") == "blue-river-maple"
     assert normalize_code("blue-river-maple") == "blue-river-maple"
+
+
+def test_can_open_case_allows_the_first_case():
+    """Nothing to finish yet, so the first create_case of a call is always allowed."""
+    assert can_open_case(None, False)
+
+
+def test_can_open_case_blocks_a_second_case_until_the_first_is_classified():
+    """The LLM re-calls create_case when a caller keeps talking; a second case opened before the
+    first has an issue type leaves staff with an empty case nobody can triage."""
+    assert not can_open_case("C-1001", False)
+    assert can_open_case("C-1001", True)

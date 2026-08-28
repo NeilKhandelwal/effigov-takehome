@@ -35,8 +35,9 @@ HEADERS = {"X-Source": "voice"}  # audit log attributes these writes to the voic
 SUMMARY_PROMPT = (
     "Summarize this City services call for staff in at most two sentences: what the "
     "resident wanted, what was actually done (case created/found, note added), and any "
-    "follow-up needed. State only what the transcript shows; if the call ended before a "
-    "case was created or found, say so plainly. Transcript:\n"
+    "follow-up needed; list every case created or found. State only what the transcript "
+    "shows; if the call ended before a case was created or found, say so plainly. "
+    "Transcript:\n"
 )
 
 
@@ -54,6 +55,12 @@ def normalize_code(spoken: str) -> str:
     # (same rule as the backend's codes.normalize; the backend is still the one that matches)
     words = [w for w in re.split(r"[\s,-]+", spoken.strip().lower()) if w and w not in ("and", "dash")]
     return "-".join(words)
+
+
+def can_open_case(current: str | None, classified: bool) -> bool:
+    # one problem per case, but a caller may raise two: allow a second case only once the
+    # first is classified, so the agent can't leave a half-filled case behind
+    return current is None or classified
 
 
 def clean_text(text: str) -> str:
@@ -97,6 +104,21 @@ async def patch_call(call_id: str | None, body: dict) -> bool:
             return True
     except Exception:
         logger.warning("patch_call failed", exc_info=True)
+        return False
+
+
+async def link_call_case(call_id: str | None, case_id: str, how: str) -> bool:
+    # how is 'created' or 'looked_up'; the backend keeps one link per (call, case)
+    if call_id is None:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5, headers=HEADERS) as client:
+            r = await client.post(f"{BACKEND}/calls/{call_id}/cases",
+                                  json={"case_id": case_id, "how": how})
+            r.raise_for_status()
+            return True
+    except Exception:
+        logger.warning("link_call_case failed", exc_info=True)
         return False
 
 
@@ -163,7 +185,10 @@ class Assistant(Agent):
                 character by character, then say "Your lookup code is <word>, <word>, <word>.
                 Say it on your next call to check on this case." Read the three words with a
                 comma between them so they land one at a time, and offer once to repeat them.
-                Never say the lookup code before the description has been saved.
+                Never say the lookup code before the description has been saved. One problem
+                per case: if the caller raises a second, separate problem, finish the first
+                (issue type and description), then call create_case again. Each case has its
+                own ID and its own lookup code, read back after that case's description.
 
                 If the caller asks about an existing case, ask for their lookup code (three
                 words) and call lookup_case. Do not look up cases by phone number or case ID.
@@ -187,17 +212,20 @@ class Assistant(Agent):
             ),
         )
         self.call_id: str | None = None  # set by the entrypoint once POST /calls succeeds
-        # the case this call created (one Assistant per job, so no reset needed);
-        # update_case uses it so the LLM never has to repeat the ID
-        self.case_id: str | None = None
-        self.lookup_code: str | None = None  # spoken back once the description is saved
-        self.call_linked = False  # PATCH /calls/{id} case_id succeeded; retried until it does
+        # the case being worked right now (update_case acts on it, so the LLM never has to
+        # repeat the ID) and every case this call touched, in order
+        self.current_case: str | None = None
+        self.cases: list[str] = []
+        self.current_classified = False  # current_case has an issue_type; gates a second case
+        self.lookup_code: str | None = None  # current_case's code, spoken once its description saves
+        self.link_how = "created"
+        self.call_linked = False  # current_case is linked to the call record; retried until it is
 
     async def _link_call(self) -> None:
         # idempotent: a failed link right after create_case is retried on the next tool call,
         # so a transient backend error can't leave the case detached from its call for good
-        if self.case_id and not self.call_linked:
-            self.call_linked = await patch_call(self.call_id, {"case_id": self.case_id})
+        if self.current_case and not self.call_linked:
+            self.call_linked = await link_call_case(self.call_id, self.current_case, self.link_how)
 
     @function_tool
     async def create_case(self, context: RunContext, name: str, phone: str) -> str:
@@ -208,9 +236,9 @@ class Assistant(Agent):
             name: caller's full name
             phone: caller's phone number
         """
-        if self.case_id:  # the LLM occasionally re-calls a tool; keep one case per call
+        if not can_open_case(self.current_case, self.current_classified):
             await self._link_call()
-            return f"Case {self.case_id} is already open for this call."
+            return "Finish describing the current issue first (issue type), then open another case."
         if not valid_phone(phone):
             n = len(digits(phone))
             return f"That number has {n} digits; a phone number should have ten. Could you say it again?"
@@ -226,7 +254,10 @@ class Assistant(Agent):
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("create_case failed")
             return BACKEND_DOWN
-        self.case_id = case_id
+        self.current_case = case_id
+        self.cases.append(case_id)
+        self.current_classified = False
+        self.link_how, self.call_linked = "created", False
         await self._link_call()
         return f"Started case {case_id}"
 
@@ -244,7 +275,7 @@ class Assistant(Agent):
             issue_type: exactly one of missed_pickup, pothole, streetlight, water, animal, other
             description: one-sentence description of the problem
         """
-        if not self.case_id:
+        if not self.current_case:
             return "No case is open yet; call create_case with the name and phone first."
         body = {}
         if issue_type is not None:
@@ -257,16 +288,18 @@ class Assistant(Agent):
             return "Nothing to update."
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
-                r = await client.patch(f"{BACKEND}/cases/{self.case_id}", json=body)
+                r = await client.patch(f"{BACKEND}/cases/{self.current_case}", json=body)
                 r.raise_for_status()
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("update_case failed")
             return BACKEND_DOWN
+        if "issue_type" in body:
+            self.current_classified = True  # the case is classified; a second one may be opened
         await self._link_call()
         if description is not None and self.lookup_code:
             # withheld until now so the agent can't read it out before the case is filled in
-            return f"Updated case {self.case_id}. Lookup code {self.lookup_code}"
-        return f"Updated case {self.case_id}"
+            return f"Updated case {self.current_case}. Lookup code {self.lookup_code}"
+        return f"Updated case {self.current_case}"
 
     @function_tool
     async def lookup_case(self, context: RunContext, code: str) -> str:
@@ -290,7 +323,13 @@ class Assistant(Agent):
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("lookup_case failed")
             return BACKEND_DOWN
-        self.case_id = c["id"]  # add_note works off this, so a note needs a verified case first
+        # work the case it found from here on: add_note writes to it, and an existing case is
+        # not one the agent is still filling in, so it never blocks a new case
+        self.current_case, self.link_how, self.current_classified = c["id"], "looked_up", True
+        self.lookup_code = None  # not ours to read out: the caller already has this one's code
+        self.call_linked = False
+        if c["id"] not in self.cases:
+            self.cases.append(c["id"])
         await self._link_call()
         issue = c["issue_type"] or "not yet classified"
         # no filed-date here: it's read aloud on every lookup
