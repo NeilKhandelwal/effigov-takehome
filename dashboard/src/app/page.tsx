@@ -5,8 +5,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Case,
   CallWithTranscript,
+  STATUSES,
   STATUS_COLOR,
+  Status,
+  ago,
+  duration,
   getCall,
+  humanize,
   listCalls,
   listCases,
   useLiveRefresh,
@@ -14,116 +19,179 @@ import {
 
 export default function CasesPage() {
   const [cases, setCases] = useState<Case[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshedAt, setRefreshedAt] = useState<string>("");
   const [live, setLive] = useState<CallWithTranscript[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshedAt, setRefreshedAt] = useState("");
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<Status | "all">("all");
 
-  const load = useCallback(
-    () =>
-      listCases()
-        .then((data) => {
-          setCases(data);
-          setError(null);
-          setRefreshedAt(new Date().toLocaleTimeString());
-        })
-        .catch((e: Error) => setError(e.message)),
-    [],
-  );
-
-  // Active calls need their transcript for the "last line" preview; /calls has none.
-  const loadLive = useCallback(
-    () =>
-      listCalls("active")
-        .then((calls) => Promise.all(calls.map((c) => getCall(c.id))))
-        .then(setLive)
-        .catch(() => setLive([])), // backend may predate /calls; not an error worth showing
-    [],
-  );
-
-  const loadAll = useCallback(() => {
-    load();
-    loadLive();
-  }, [load, loadLive]);
+  const load = useCallback(() => {
+    listCases()
+      .then((data) => {
+        setCases(data);
+        setError(null);
+        setRefreshedAt(new Date().toLocaleTimeString());
+      })
+      .catch((e: Error) => setError(e.message));
+    // Active calls need their transcript for the "last line" preview; /calls has none.
+    listCalls("active")
+      .then((calls) => Promise.all(calls.map((c) => getCall(c.id))))
+      .then(setLive)
+      .catch(() => setLive([]));
+  }, []);
 
   useEffect(() => {
-    loadAll();
-    const timer = setInterval(loadAll, 2000); // fallback when the socket is down
+    load();
+    const timer = setInterval(load, 2000); // fallback when the socket is down
     return () => clearInterval(timer);
-  }, [loadAll]);
-  useLiveRefresh(loadAll);
+  }, [load]);
+  useLiveRefresh(load);
+
+  const onCall = new Set(live.map((c) => c.case_id).filter(Boolean));
+  const count = (s: Status) => cases.filter((c) => c.status === s).length;
+  const needle = q.trim().toLowerCase();
+  const shown = cases.filter(
+    (c) =>
+      (filter === "all" || c.status === filter) &&
+      (!needle || [c.id, c.name, c.phone, c.issue_type, c.description].join(" ").toLowerCase().includes(needle)),
+  );
+
+  const tile = (label: string, value: number, key: Status | "all", accent = "") => (
+    <button
+      onClick={() => setFilter(filter === key ? "all" : key)}
+      className={`text-left rounded-lg border bg-white px-4 py-3 shadow-sm transition ${
+        filter === key ? "border-slate-900 ring-1 ring-slate-900" : "border-slate-200 hover:border-slate-400"
+      }`}
+    >
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`text-2xl font-semibold ${accent}`}>{value}</div>
+    </button>
+  );
 
   return (
-    <main className="p-6 max-w-5xl mx-auto">
+    <main className="p-6 max-w-6xl mx-auto w-full">
       <div className="flex items-baseline justify-between mb-4">
-        <h1 className="text-xl font-semibold">Cases</h1>
-        <span className="text-xs text-gray-500">
-          {refreshedAt ? `last refreshed ${refreshedAt}` : "loading…"}
-        </span>
+        <div>
+          <h1 className="text-xl font-semibold">Cases</h1>
+          <p className="text-sm text-slate-500">Service requests taken by the voice agent</p>
+        </div>
+        <span className="text-xs text-slate-500">{refreshedAt ? `updated ${refreshedAt}` : "loading…"}</span>
       </div>
-      {error && <p className="text-red-700 mb-4">{error}</p>}
+      {error && <p className="text-red-700 mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm">{error}</p>}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="text-xs text-slate-500">Active calls</div>
+          <div className="text-2xl font-semibold flex items-center gap-2">
+            {live.length}
+            {live.length > 0 && <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />}
+          </div>
+        </div>
+        {tile("Open", count("open"), "open", "text-blue-700")}
+        {tile("In progress", count("in_progress"), "in_progress", "text-amber-700")}
+        {tile("Resolved", count("resolved"), "resolved", "text-emerald-700")}
+      </div>
+
       {live.length > 0 && (
         <section className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-700 mb-2">
-            Live calls
-            <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">
-              {live.length}
-            </span>
-          </h2>
-          <ul className="space-y-1">
+          <h2 className="text-sm font-semibold text-slate-700 mb-2">Live calls</h2>
+          <div className="grid md:grid-cols-2 gap-3">
             {live.map((c) => {
               const last = c.transcript[c.transcript.length - 1];
               return (
-                <li key={c.id} className="flex gap-3 text-sm border rounded px-3 py-2 bg-red-50">
-                  <Link href={`/calls/${c.id}`} className="text-blue-700 underline shrink-0">
-                    {c.id}
-                  </Link>
-                  <span className="text-gray-500 shrink-0">
-                    {c.case_id ? `case ${c.case_id}` : "no case yet"}
-                  </span>
-                  <span className="truncate text-gray-800">
-                    {last ? `${last.role}: ${last.text}` : "(no transcript yet)"}
-                  </span>
-                </li>
+                <Link
+                  key={c.id}
+                  href={`/calls/${c.id}`}
+                  className="block rounded-lg border border-red-200 bg-white p-3 shadow-sm hover:border-red-400"
+                >
+                  <div className="flex items-center gap-2 text-sm mb-1">
+                    <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                    <span className="font-medium">{c.id}</span>
+                    <span className="text-slate-500 font-mono text-xs">{duration(c.started_at, null)}</span>
+                    <span className="ml-auto text-xs text-slate-500">
+                      {c.case_id ? `→ ${c.case_id}` : "no case yet"}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-700 truncate">
+                    {last ? (
+                      <>
+                        <span className="text-slate-400">{last.role === "user" ? "Caller" : "Agent"}:</span> {last.text}
+                      </>
+                    ) : (
+                      <span className="text-slate-400">Waiting for the first line…</span>
+                    )}
+                  </p>
+                </Link>
               );
             })}
-          </ul>
+          </div>
         </section>
       )}
-      <table className="w-full text-sm">
-        <thead className="text-left text-gray-500 border-b">
-          <tr>
-            <th className="py-2 pr-4">ID</th>
-            <th className="py-2 pr-4">Name</th>
-            <th className="py-2 pr-4">Issue</th>
-            <th className="py-2 pr-4">Status</th>
-            <th className="py-2 pr-4">Phone</th>
-            <th className="py-2">Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          {cases.map((c) => (
-            <tr key={c.id} className="border-b">
-              <td className="py-2 pr-4">
-                <Link href={`/cases/${c.id}`} className="text-blue-700 underline">
-                  {c.id}
-                </Link>
-              </td>
-              <td className="py-2 pr-4">{c.name}</td>
-              <td className="py-2 pr-4">{c.issue_type}</td>
-              <td className="py-2 pr-4">
-                <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLOR[c.status]}`}>
-                  {c.status}
-                </span>
-              </td>
-              <td className="py-2 pr-4">{c.phone}</td>
-              <td className="py-2">{new Date(c.created_at).toLocaleString()}</td>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search id, name, phone, description…"
+          className="flex-1 min-w-60 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
+        />
+        {(["all", ...STATUSES] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setFilter(s)}
+            className={`px-3 py-1 rounded-full text-xs border ${
+              filter === s ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-300 hover:border-slate-500"
+            }`}
+          >
+            {s === "all" ? "All" : humanize(s)}
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="py-2 px-4">Case</th>
+              <th className="py-2 px-4">Resident</th>
+              <th className="py-2 px-4">Issue</th>
+              <th className="py-2 px-4">Status</th>
+              <th className="py-2 px-4">Phone</th>
+              <th className="py-2 px-4">Updated</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {!error && cases.length === 0 && refreshedAt && (
-        <p className="text-gray-500 mt-4">No cases yet.</p>
-      )}
+          </thead>
+          <tbody>
+            {shown.map((c) => (
+              <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <td className="py-2.5 px-4">
+                  <Link href={`/cases/${c.id}`} className="font-medium text-blue-700 hover:underline">
+                    {c.id}
+                  </Link>
+                  {onCall.has(c.id) && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] text-red-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> on call
+                    </span>
+                  )}
+                </td>
+                <td className="py-2.5 px-4">{c.name}</td>
+                <td className="py-2.5 px-4">{humanize(c.issue_type)}</td>
+                <td className="py-2.5 px-4">
+                  <span className={`px-2 py-0.5 rounded-full text-xs ring-1 ${STATUS_COLOR[c.status]}`}>
+                    {humanize(c.status)}
+                  </span>
+                </td>
+                <td className="py-2.5 px-4 font-mono text-xs">{c.phone}</td>
+                <td className="py-2.5 px-4 text-slate-500" title={new Date(c.updated_at).toLocaleString()}>
+                  {ago(c.updated_at)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!error && shown.length === 0 && refreshedAt && (
+          <p className="text-slate-500 text-sm p-4">{cases.length === 0 ? "No cases yet." : "No cases match."}</p>
+        )}
+      </div>
     </main>
   );
 }

@@ -6,61 +6,56 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Case,
   CallWithTranscript,
+  ISSUE_TYPES,
   STATUSES,
   STATUS_COLOR,
   Status,
+  Tracked,
+  duration,
+  flash,
   getCase,
   getCaseCalls,
+  humanize,
   patchCase,
+  track,
+  untracked,
   useLiveRefresh,
 } from "@/lib/api";
 import Transcript from "@/components/Transcript";
 
 export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [c, setCase] = useState<Case | null>(null);
+  const [c, setCase] = useState<Tracked<Case>>(untracked);
+  const [calls, setCalls] = useState<CallWithTranscript[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false); // true while the user has unsaved edits
-  const [calls, setCalls] = useState<CallWithTranscript[]>([]);
 
-  const load = useCallback(
-    () =>
-      getCase(id)
-        .then((data) => {
-          setCase(data);
-          setError(null);
-          // don't clobber the textarea while the user is editing it
-          if (!dirty) setNotes(data.notes);
-        })
-        .catch((e: Error) => setError(e.message)),
-    [id, dirty],
-  );
-
-  const loadCalls = useCallback(
-    () =>
-      getCaseCalls(id)
-        .then(setCalls)
-        .catch(() => setCalls([])), // backend may predate /cases/{id}/calls
-    [id],
-  );
-
-  const loadAll = useCallback(() => {
-    load();
-    loadCalls();
-  }, [load, loadCalls]);
+  const load = useCallback(() => {
+    getCase(id)
+      .then((data) => {
+        setCase((prev) => track(prev, data));
+        setError(null);
+        // don't clobber the textarea while the user is editing it
+        if (!dirty) setNotes(data.notes);
+      })
+      .catch((e: Error) => setError(e.message));
+    getCaseCalls(id)
+      .then(setCalls)
+      .catch(() => setCalls([]));
+  }, [id, dirty]);
 
   useEffect(() => {
-    loadAll();
-    const timer = setInterval(loadAll, 2000); // fallback when the socket is down
+    load();
+    const timer = setInterval(load, 2000); // fallback when the socket is down
     return () => clearInterval(timer);
-  }, [loadAll]);
-  useLiveRefresh(loadAll);
+  }, [load]);
+  useLiveRefresh(load);
 
   const update = (body: Partial<Case>) =>
     patchCase(id, body)
       .then((data) => {
-        setCase(data);
+        setCase((prev) => track(prev, data));
         setError(null);
         return data;
       })
@@ -71,91 +66,137 @@ export default function CaseDetailPage() {
     if (data) setDirty(false);
   };
 
+  const cs = c.data;
+  const liveCall = calls.find((k) => k.status === "active");
+  const card = "rounded-lg border border-slate-200 bg-white shadow-sm p-4";
+  const h2 = "text-xs uppercase tracking-wide text-slate-500 mb-3";
+
   return (
-    <main className="p-6 max-w-3xl mx-auto">
-      <Link href="/" className="text-sm text-blue-700 underline">
+    <main className="p-6 max-w-6xl mx-auto w-full">
+      <Link href="/" className="text-sm text-blue-700 hover:underline">
         &larr; All cases
       </Link>
-      <h1 className="text-xl font-semibold mt-2 mb-4">Case {id}</h1>
-      {error && <p className="text-red-700 mb-4">{error}</p>}
-      {c && (
-        <>
-          <dl className="grid grid-cols-[10rem_1fr] gap-y-2 text-sm mb-6">
-            <dt className="text-gray-500">Name</dt>
-            <dd>{c.name}</dd>
-            <dt className="text-gray-500">Phone</dt>
-            <dd>{c.phone}</dd>
-            <dt className="text-gray-500">Issue type</dt>
-            <dd>{c.issue_type}</dd>
-            <dt className="text-gray-500">Description</dt>
-            <dd>{c.description}</dd>
-            <dt className="text-gray-500">Status</dt>
-            <dd className="flex items-center gap-2">
+      <div className="flex items-center gap-3 mt-2 mb-4">
+        <h1 className="text-xl font-semibold">Case {id}</h1>
+        {cs && (
+          <span className={`px-2 py-0.5 rounded-full text-xs ring-1 ${STATUS_COLOR[cs.status]} ${flash(c, "status")}`}>
+            {humanize(cs.status)}
+          </span>
+        )}
+        {liveCall && (
+          <Link
+            href={`/calls/${liveCall.id}`}
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> On call · {liveCall.id}
+          </Link>
+        )}
+      </div>
+      {error && <p className="text-red-700 mb-4 text-sm">{error}</p>}
+
+      {cs && (
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 space-y-4">
+            <section className={card}>
+              <h2 className={h2}>Details</h2>
+              <dl className="grid grid-cols-[8rem_1fr] gap-y-2 text-sm">
+                <dt className="text-slate-500">Resident</dt>
+                <dd className={flash(c, "name")}>{cs.name}</dd>
+                <dt className="text-slate-500">Phone</dt>
+                <dd className={`font-mono text-xs self-center ${flash(c, "phone")}`}>{cs.phone}</dd>
+                <dt className="text-slate-500">Issue</dt>
+                <dd className={flash(c, "issue_type")}>{humanize(cs.issue_type)}</dd>
+                <dt className="text-slate-500">Description</dt>
+                <dd className={flash(c, "description")}>{cs.description}</dd>
+              </dl>
+            </section>
+
+            <section className={card}>
+              <h2 className={h2}>Notes</h2>
+              <textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  setDirty(true);
+                }}
+                rows={5}
+                placeholder="Internal notes — the agent's add_note tool appends here too."
+                className={`w-full rounded-md border border-slate-300 p-2 text-sm ${flash(c, "notes")}`}
+              />
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={saveNotes}
+                  disabled={!dirty}
+                  className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40"
+                >
+                  Save notes
+                </button>
+                {dirty && <span className="text-xs text-amber-700">Unsaved changes</span>}
+              </div>
+            </section>
+
+            <section className={card}>
+              <h2 className={h2}>Calls ({calls.length})</h2>
+              {calls.length === 0 && <p className="text-slate-500 text-sm">No calls linked to this case.</p>}
+              <div className="space-y-4">
+                {calls.map((call) => (
+                  <div key={call.id}>
+                    <div className="flex items-center gap-2 text-sm mb-1.5">
+                      <Link href={`/calls/${call.id}`} className="font-medium text-blue-700 hover:underline">
+                        {call.id}
+                      </Link>
+                      {call.status === "active" ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-red-700">
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> Live
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-500">Ended</span>
+                      )}
+                      <span className="text-xs text-slate-500">
+                        {new Date(call.started_at).toLocaleString()} · <span className="font-mono">{duration(call.started_at, call.ended_at)}</span>
+                      </span>
+                    </div>
+                    <Transcript lines={call.transcript} className="max-h-72" />
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <aside className={`${card} text-sm h-fit space-y-4`}>
+            <div>
+              <h2 className={h2}>Triage</h2>
+              <label className="block text-slate-500 text-xs mb-1" htmlFor="status">Status</label>
               <select
-                value={c.status}
+                id="status"
+                value={cs.status}
                 onChange={(e) => update({ status: e.target.value as Status })}
-                className="border rounded px-2 py-1"
+                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 mb-3"
               >
                 {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
+                  <option key={s} value={s}>{humanize(s)}</option>
                 ))}
               </select>
-              <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLOR[c.status]}`}>
-                {c.status}
-              </span>
-            </dd>
-            <dt className="text-gray-500">Created</dt>
-            <dd>{new Date(c.created_at).toLocaleString()}</dd>
-            <dt className="text-gray-500">Updated</dt>
-            <dd>{new Date(c.updated_at).toLocaleString()}</dd>
-          </dl>
-          <label className="block text-sm text-gray-500 mb-1" htmlFor="notes">
-            Notes
-          </label>
-          <textarea
-            id="notes"
-            value={notes}
-            onChange={(e) => {
-              setNotes(e.target.value);
-              setDirty(true);
-            }}
-            rows={6}
-            className="w-full border rounded p-2 text-sm"
-          />
-          <button
-            onClick={saveNotes}
-            disabled={!dirty}
-            className="mt-2 px-3 py-1 rounded bg-blue-700 text-white text-sm disabled:opacity-50"
-          >
-            Save notes
-          </button>
-          <section className="mt-8">
-            <h2 className="text-sm font-semibold text-gray-700 mb-2">Calls</h2>
-            {calls.length === 0 && <p className="text-gray-500 text-sm">No calls linked.</p>}
-            {calls.map((call) => (
-              <div key={call.id} className="mb-4">
-                <div className="flex items-center gap-2 text-sm mb-1">
-                  <Link href={`/calls/${call.id}`} className="text-blue-700 underline">
-                    {call.id}
-                  </Link>
-                  {call.status === "active" ? (
-                    <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">
-                      LIVE
-                    </span>
-                  ) : (
-                    <span className="text-gray-500">ended</span>
-                  )}
-                  <span className="text-gray-500">
-                    {new Date(call.started_at).toLocaleString()}
-                  </span>
-                </div>
-                <Transcript lines={call.transcript} />
-              </div>
-            ))}
-          </section>
-        </>
+              <label className="block text-slate-500 text-xs mb-1" htmlFor="issue">Issue type</label>
+              <select
+                id="issue"
+                value={cs.issue_type}
+                onChange={(e) => update({ issue_type: e.target.value })}
+                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5"
+              >
+                {ISSUE_TYPES.map((s) => (
+                  <option key={s} value={s}>{humanize(s)}</option>
+                ))}
+              </select>
+            </div>
+            <dl className="space-y-1.5 text-xs border-t border-slate-100 pt-3">
+              <div className="flex justify-between"><dt className="text-slate-500">Created</dt><dd>{new Date(cs.created_at).toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Updated</dt><dd>{new Date(cs.updated_at).toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Calls</dt><dd>{calls.length}</dd></div>
+            </dl>
+          </aside>
+        </div>
       )}
     </main>
   );

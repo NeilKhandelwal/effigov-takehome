@@ -3,8 +3,8 @@
 import { useEffect, useRef } from "react";
 import { TranscriptLine } from "@/lib/api";
 
-// Chat-style list: user on the right, agent on the left. Scrolls to the newest line.
-export default function Transcript({ lines }: { lines: TranscriptLine[] }) {
+// Chat-style list: caller on the right, agent on the left. Scrolls to the newest line.
+export default function Transcript({ lines, className = "max-h-[60vh]" }: { lines: TranscriptLine[]; className?: string }) {
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -13,22 +13,25 @@ export default function Transcript({ lines }: { lines: TranscriptLine[] }) {
   }, [lines.length]);
 
   return (
-    <div ref={box} className="max-h-[70vh] overflow-y-auto space-y-2 p-2 border rounded bg-white">
-      {lines.length === 0 && <p className="text-gray-500 text-sm">No transcript yet.</p>}
-      {lines.map((l) => (
-        <div key={l.id} className={`flex ${l.role === "user" ? "justify-end" : "justify-start"}`}>
-          <div
-            className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-              l.role === "user" ? "bg-blue-100 text-blue-900" : "bg-gray-100 text-gray-900"
-            }`}
-          >
-            <div className="text-[10px] text-gray-500 mb-0.5">
-              {l.role} · {new Date(l.ts).toLocaleTimeString()}
+    <div ref={box} className={`${className} overflow-y-auto space-y-3 p-4 rounded-lg bg-slate-50 border border-slate-200`}>
+      {lines.length === 0 && <p className="text-slate-500 text-sm">Waiting for the first line…</p>}
+      {lines.map((l) => {
+        const user = l.role === "user";
+        return (
+          <div key={l.id} className={`flex ${user ? "justify-end" : "justify-start"}`}>
+            <div
+              className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
+                user ? "bg-blue-600 text-white rounded-br-sm" : "bg-white text-slate-900 border border-slate-200 rounded-bl-sm"
+              }`}
+            >
+              <div className={`text-[10px] mb-0.5 ${user ? "text-blue-100" : "text-slate-500"}`}>
+                {user ? "Caller" : "Agent"} · {new Date(l.ts).toLocaleTimeString()}
+              </div>
+              {l.text}
             </div>
-            {l.text}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
