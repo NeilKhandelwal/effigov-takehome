@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS case_events (
 );
 """
 
+# Run after the ALTER TABLEs below, not inside SCHEMA: on a cases.db predating the
+# `room` column, indexing calls(room) has to wait until the column exists.
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_cases_phone ON cases(phone);
+CREATE INDEX IF NOT EXISTS idx_calls_case_id ON calls(case_id);
+CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status);
+CREATE INDEX IF NOT EXISTS idx_calls_room ON calls(room);
+CREATE INDEX IF NOT EXISTS idx_transcript_call_id ON transcript(call_id);
+CREATE INDEX IF NOT EXISTS idx_case_events_case_id ON case_events(case_id);
+"""
+
 
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -62,6 +73,7 @@ def init_db() -> None:
             conn.execute("ALTER TABLE calls ADD COLUMN summary TEXT")
         except sqlite3.OperationalError:
             pass  # duplicate column: already migrated
+        conn.executescript(INDEXES)
 
 
 def case_id(rowid: int) -> str:
