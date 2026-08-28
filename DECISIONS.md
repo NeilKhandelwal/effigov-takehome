@@ -35,3 +35,5 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 | Post-call summary | 4862a32, e0a5f85 |
 | Dashboard console + polish | e498c5a, 67f470c, cf941e5, e0d5b3a, 743991f |
 | Demo reset + clean-clone fixes | fe66227, 315626c |
+0:59 | case opened at name+phone, issue_type/description filled by update_case as learned; agent never sets status (PR #2) | spec: "issue type updates once the agent has enough confidence" | one more tool call per case, one more prompt sequence to keep gpt-4.1-mini honest
+1:02 | draft audit PRs #3–#13 = cherry-picked copies of features already on main | user reviews in the PR UI; do not merge | 11 extra branches in the repo (delete after review)
