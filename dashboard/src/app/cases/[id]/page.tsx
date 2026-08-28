@@ -79,6 +79,7 @@ export default function CaseDetailPage() {
     !v ? "—" : e.field === "status" || e.field === "issue_type" ? humanize(v) : v;
   const cs = c.data;
   const liveCall = calls.find((k) => k.status === "active");
+  const ended = calls.filter((k) => k.status !== "active");
   const card = "rounded-lg border border-slate-200 bg-white shadow-sm p-4";
   const h2 = "text-xs uppercase tracking-wide text-slate-500 mb-3";
 
@@ -150,27 +151,39 @@ export default function CaseDetailPage() {
             <section className={card}>
               <h2 className={h2}>Calls ({calls.length})</h2>
               {calls.length === 0 && <p className="text-slate-500 text-sm">No calls linked to this case.</p>}
-              <div className="space-y-4">
-                {calls.map((call) => (
-                  <div key={call.id}>
-                    <div className="flex items-center gap-2 text-sm mb-1.5">
-                      <Link href={`/calls/${call.id}`} className="font-medium text-blue-700 hover:underline">
-                        {call.id}
-                      </Link>
-                      {call.status === "active" ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-red-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> Live
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-500">Ended</span>
-                      )}
-                      <span className="text-xs text-slate-500">
-                        {new Date(call.started_at).toLocaleString()} · <span className="font-mono">{duration(call.started_at, call.ended_at)}</span>
-                      </span>
-                    </div>
-                    {call.summary && <p className="mb-1.5 text-sm italic text-slate-600">{call.summary}</p>}
-                    <Transcript lines={call.transcript} className="max-h-72" active={call.status === "active"} />
+              {/* the call happening right now is the only one worth reading in full; the rest fold away */}
+              {liveCall && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 text-sm mb-1.5">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-700 ring-1 ring-red-200">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
+                    </span>
+                    <Link href={`/calls/${liveCall.id}`} className="font-medium text-blue-700 hover:underline">
+                      {liveCall.id}
+                    </Link>
+                    <span className="text-xs text-slate-500">
+                      started {new Date(liveCall.started_at).toLocaleTimeString()} ·{" "}
+                      <span className="font-mono">{duration(liveCall.started_at, null)}</span>
+                    </span>
                   </div>
+                  <Transcript lines={liveCall.transcript} className="max-h-[60vh] min-h-64" active />
+                </div>
+              )}
+              <div className="space-y-2">
+                {ended.map((call) => (
+                  <details key={call.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <summary className="cursor-pointer text-sm text-slate-700">
+                      {call.id} · ended · <span className="font-mono">{duration(call.started_at, call.ended_at)}</span> ·{" "}
+                      {call.transcript.length} lines
+                    </summary>
+                    <div className="pt-2">
+                      {call.summary && <p className="mb-1.5 text-sm italic text-slate-600">{call.summary}</p>}
+                      <Link href={`/calls/${call.id}`} className="text-xs text-blue-700 hover:underline">
+                        Open call
+                      </Link>
+                      <Transcript lines={call.transcript} className="max-h-72 mt-1.5" />
+                    </div>
+                  </details>
                 ))}
               </div>
             </section>
