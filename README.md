@@ -46,7 +46,7 @@ Terminal-only alternative for the voice side: `uv run python src/agent.py consol
 
 Reset to a clean demo state at any time (do it right before a demo): `cd backend && uv run python -m scripts.reset_demo` — wipes all tables, reseeds the 3 cases.
 
-Built in the 3-hour window with Claude Code as pair: I set the contract, data model, and every design decision (see `DECISIONS.md`); agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one.
+Built in the 3-hour window with Claude Code as pair: I set the contract, data model, and every design decision (see `DECISIONS.md`); agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one. Scaffolding came from outside the window: `agent/` from LiveKit's [`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python), `dashboard/` from `create-next-app`, and `backend/` from my own FastAPI + uv project template (layout and tooling only). All application code — endpoints, data model, WebSocket, agent tools and prompt, every dashboard page — was written during the 3 hours.
 
 `CONTRACT.md` is the API contract all three parts were built against; `DECISIONS.md` is the timestamped tradeoff log.
 
