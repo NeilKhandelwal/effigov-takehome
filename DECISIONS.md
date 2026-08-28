@@ -36,4 +36,4 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 | Dashboard console + polish | e498c5a, 67f470c, cf941e5, e0d5b3a, 743991f |
 | Demo reset + clean-clone fixes | fe66227, 315626c |
 0:59 | case opened at name+phone, issue_type/description filled by update_case as learned; agent never sets status (PR #2) | spec: "issue type updates once the agent has enough confidence" | one more tool call per case, one more prompt sequence to keep gpt-4.1-mini honest
-1:02 | draft audit PRs #3–#13 = cherry-picked copies of features already on main | user reviews in the PR UI; do not merge | 11 extra branches in the repo (delete after review)
+1:02 | tried draft audit PRs (#3–#13) for features already on main; closed 5 min later | cherry-picked copies showed merge conflicts, not clean diffs; commit links do the job | 5 min
