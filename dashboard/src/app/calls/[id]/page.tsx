@@ -39,14 +39,23 @@ export default function CallPage() {
       .then(async (data) => {
         // The linked case sits beside the transcript so staff see fields fill in as the agent learns them.
         // Its events time the stepper: when the case was linked, what the agent changed mid-call.
-        // Events are decoration: if that fetch fails the case still renders.
+        // Neither side fetch may block the call itself: events are decoration, and a failing
+        // case fetch keeps the previous panel on screen with the error shown.
+        let caseError: string | null = null;
         const [cs, evs] = data.case_id
-          ? await Promise.all([getCase(data.case_id), getCaseEvents(data.case_id).catch(() => [] as CaseEvent[])])
+          ? await Promise.all([
+              getCase(data.case_id).catch((e: Error) => {
+                caseError = e.message;
+                return null;
+              }),
+              getCaseEvents(data.case_id).catch(() => [] as CaseEvent[]),
+            ])
           : [null, []];
         if (mine !== seq.current) return; // a newer load already committed
         setCall(data);
-        setError(null);
-        setCase((prev) => (cs ? track(prev, cs) : untracked()));
+        setError(caseError);
+        if (cs) setCase((prev) => track(prev, cs));
+        else if (!data.case_id) setCase(untracked());
         setEvents(evs);
       })
       .catch((e: Error) => {
