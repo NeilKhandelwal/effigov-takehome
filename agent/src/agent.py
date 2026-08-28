@@ -102,8 +102,8 @@ class Assistant(Agent):
                 the caller says onto exactly one of: {ISSUE_TYPES}.
                 Then call create_case and read the case ID back slowly, character by character.
 
-                If the caller asks about an existing case, ask for their phone number and call
-                lookup_case. To add a note, call add_note with the case ID and the note.
+                If the caller asks about an existing case, call lookup_case with the phone
+                number they already gave on this call; only ask for it if you don't have it. To add a note, call add_note with the case ID and the note.
 
                 This is a voice call: plain text only, one or two short sentences per reply,
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
