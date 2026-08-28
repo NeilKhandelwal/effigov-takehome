@@ -71,7 +71,8 @@ export const patchCase = (id: string, body: Partial<Case>) =>
 
 export type Call = {
   id: string;
-  case_id: string | null;
+  case_id: string | null; // the case the agent is working right now (a cursor, not the whole story)
+  case_ids: string[]; // every case this call created or found, in link order
   status: "active" | "needs_person" | "ended";
   started_at: string;
   ended_at: string | null;
@@ -89,6 +90,11 @@ export type TranscriptLine = {
 };
 
 export type CallWithTranscript = Call & { transcript: TranscriptLine[] };
+
+// Every case a call touched. Falls back to the cursor so a call fetched before
+// call_cases existed still renders.
+export const caseIdsOf = (c: Pick<Call, "case_id" | "case_ids">) =>
+  c.case_ids?.length ? c.case_ids : c.case_id ? [c.case_id] : [];
 
 export const listCalls = (status?: Call["status"]) =>
   request<Call[]>(status ? `/calls?status=${status}` : "/calls");

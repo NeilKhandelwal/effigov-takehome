@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Call, ago, duration, listCalls, useLiveRefresh, useNow } from "@/lib/api";
+import { Call, ago, caseIdsOf, duration, listCalls, useLiveRefresh, useNow } from "@/lib/api";
 
 type Filter = "all" | "live" | "ended" | "unlinked";
 
@@ -54,7 +54,7 @@ export default function CallsPage() {
         (filter === "live" && c.status === "active") ||
         (filter === "ended" && c.status === "ended") ||
         (filter === "unlinked" && !c.case_id)) &&
-      (!needle || `${c.id} ${c.case_id ?? ""}`.toLowerCase().includes(needle)),
+      (!needle || `${c.id} ${caseIdsOf(c).join(" ")}`.toLowerCase().includes(needle)),
   );
 
   const tile = (label: string, value: string | number) => (
@@ -149,10 +149,15 @@ export default function CallsPage() {
                 </td>
                 <td className="py-2.5 px-4 font-mono text-xs">{duration(c.started_at, c.ended_at)}</td>
                 <td className="py-2.5 px-4">
-                  {c.case_id ? (
-                    <Link href={`/cases/${c.case_id}`} className="text-blue-700 hover:underline">
-                      {c.case_id}
-                    </Link>
+                  {caseIdsOf(c).length ? (
+                    caseIdsOf(c).map((cid, i) => (
+                      <span key={cid}>
+                        {i > 0 && ", "}
+                        <Link href={`/cases/${cid}`} className="text-blue-700 hover:underline">
+                          {cid}
+                        </Link>
+                      </span>
+                    ))
                   ) : (
                     <span className="text-slate-400">—</span>
                   )}
