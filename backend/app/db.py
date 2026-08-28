@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS calls (
     status TEXT NOT NULL DEFAULT 'active',
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    room TEXT
+    room TEXT,
+    summary TEXT
 );
 CREATE TABLE IF NOT EXISTS transcript (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +56,10 @@ def init_db() -> None:
         try:
             # CREATE TABLE IF NOT EXISTS won't add `room` to a calls table that already exists
             conn.execute("ALTER TABLE calls ADD COLUMN room TEXT")
+        except sqlite3.OperationalError:
+            pass  # duplicate column: already migrated
+        try:
+            conn.execute("ALTER TABLE calls ADD COLUMN summary TEXT")
         except sqlite3.OperationalError:
             pass  # duplicate column: already migrated
 

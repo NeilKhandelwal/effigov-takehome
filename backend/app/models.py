@@ -41,6 +41,7 @@ class CallCreate(BaseModel):
 class CallUpdate(BaseModel):
     status: CallStatus | None = None
     case_id: str | None = None
+    summary: str | None = None
 
 
 class Call(BaseModel):
@@ -50,6 +51,7 @@ class Call(BaseModel):
     started_at: str
     ended_at: str | None
     room: str | None
+    summary: str | None
 
 
 class TranscriptCreate(BaseModel):

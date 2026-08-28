@@ -17,3 +17,5 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 0:31 | transcript = one line per committed turn (conversation_item_added for both roles), not per STT segment | "925." / "915-7062." were two bubbles; the transcript is what the CTO looks at | ~1s later per user line
 0:38 | demo from the browser: /token endpoint + dashboard /call page, agent in dev mode | screen-share one Chrome tab with audio instead of a terminal | 3 npm deps + livekit-api; console mode kept as fallback
 0:39 | no Docker / hosting | brief says localhost three times; 3 processes + CORS + wss is where a demo breaks at 15:50 | a link the CTO could click
+0:45 | update flow verified live: lookup by phone -> note added by voice -> audit shows source=voice -> ended on hang-up | - | -
+0:46 | dashboard polish pass (transcript auto-scroll, typing bubble, row flash) in a separate Opus session — user's call over my hold | user judged demo feel worth it | ~20 min, more UI to defend

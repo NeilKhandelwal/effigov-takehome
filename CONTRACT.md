@@ -78,3 +78,11 @@ Console mode keeps working for local testing.
   `GET /calls?room=` (poll + WS refresh like everywhere else), with a link to the case once linked.
   Deps: @livekit/components-react, @livekit/components-styles, livekit-client.
 - Call end: when the browser participant disconnects, the agent job shuts down -> existing end_call marks status=ended.
+
+## Summary (added 13:37)
+- `calls` gains nullable `summary TEXT`; Call JSON includes `"summary"` (null until written).
+- `PATCH /calls/{id}` accepts `{"summary": "..."}` like its other fields; staff can also edit it.
+- Written by: the agent, in its shutdown callback, right before it PATCHes status=ended — it asks the
+  same LLM for at most two sentences over the call's own transcript. Fewer than 2 turns, or any LLM
+  failure -> no summary written (stays null); the call is still marked ended.
+- Dashboard: shows it on /calls/[id] and on the case's call list; absent = "no summary".
