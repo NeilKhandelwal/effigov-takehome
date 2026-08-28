@@ -20,6 +20,7 @@ import {
   useLiveRefresh,
   useNow,
 } from "@/lib/api";
+import CallFlow from "@/components/CallFlow";
 
 export default function CasesPage() {
   const [cases, setCases] = useState<TrackedList<Case>>(untrackedList);
@@ -50,7 +51,7 @@ export default function CasesPage() {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
-  useNow(); // durations tick every second, not only when data arrives
+  const now = useNow(); // durations tick every second, not only when data arrives
 
   const onCall = new Set(live.map((c) => c.case_id).filter(Boolean));
   const rows = cases.data;
@@ -127,6 +128,10 @@ export default function CasesPage() {
                       <span className="text-slate-400">Waiting for the first line…</span>
                     )}
                   </p>
+                  {/* Dots only here: the last line is what staff read, the card keeps its height. */}
+                  <div className="mt-2">
+                    <CallFlow call={c} now={now} compact />
+                  </div>
                 </Link>
               );
             })}

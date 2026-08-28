@@ -6,24 +6,28 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Case,
   CallWithTranscript,
+  CaseEvent,
   STATUS_COLOR,
   Tracked,
   duration,
   flash,
   getCall,
   getCase,
+  getCaseEvents,
   humanize,
   track,
   untracked,
   useLiveRefresh,
   useNow,
 } from "@/lib/api";
+import CallFlow from "@/components/CallFlow";
 import Transcript from "@/components/Transcript";
 
 export default function CallPage() {
   const { id } = useParams<{ id: string }>();
   const [call, setCall] = useState<CallWithTranscript | null>(null);
   const [c, setCase] = useState<Tracked<Case>>(untracked);
+  const [events, setEvents] = useState<CaseEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
@@ -33,7 +37,15 @@ export default function CallPage() {
           setCall(data);
           setError(null);
           // The linked case sits beside the transcript so staff see fields fill in as the agent learns them.
-          return data.case_id ? getCase(data.case_id).then((cs) => setCase((prev) => track(prev, cs))) : setCase(untracked());
+          // Its events time the stepper: when the case was linked, what the agent changed mid-call.
+          if (!data.case_id) {
+            setEvents([]);
+            return setCase(untracked());
+          }
+          return Promise.all([getCase(data.case_id), getCaseEvents(data.case_id)]).then(([cs, evs]) => {
+            setCase((prev) => track(prev, cs));
+            setEvents(evs);
+          });
         })
         .catch((e: Error) => setError(e.message)),
     [id],
@@ -45,7 +57,7 @@ export default function CallPage() {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
-  useNow(); // durations tick every second, not only when data arrives
+  const now = useNow(); // durations tick every second, not only when data arrives
 
   const active = call?.status === "active";
   const cs = c.data;
@@ -74,6 +86,12 @@ export default function CallPage() {
         )}
       </div>
       {error && <p className="text-red-700 mb-4 text-sm">{error}</p>}
+
+      {call && (
+        <div className="mb-5 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <CallFlow call={call} events={events} now={now} />
+        </div>
+      )}
 
       {call && (
         <div className="grid md:grid-cols-3 gap-4">
