@@ -18,6 +18,7 @@ import {
   getToken,
   listCallsByRoom,
   useLiveRefresh,
+  useNow,
 } from "@/lib/api";
 import Transcript from "@/components/Transcript";
 
@@ -151,6 +152,7 @@ function LiveTranscript({ room }: { room: string }) {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
+  useNow(); // duration ticks every second, not only when data arrives
 
   if (error) return <p className="text-red-700 text-sm">{error}</p>;
   if (!call)
