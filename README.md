@@ -28,13 +28,17 @@ One narrow workflow, end to end:
 ## Run (three terminals)
 ```sh
 # 1. backend (http://localhost:8000, SQLite file backend/cases.db)
-cd backend && uv sync && uv run python -m scripts.seed && uv run uvicorn app.main:app --reload --port 8000
-# 2. dashboard
-cd dashboard && npm install && npm run dev        # http://localhost:3000
-# 3. voice agent — talk to it from your terminal mic (LiveKit console mode)
-cd agent && cp .env.example .env   # fill LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET
-uv sync && uv run python src/agent.py console
+cd backend && cp .env.example .env    # LIVEKIT_* (needed only for the browser call's /token)
+uv sync && uv run python -m scripts.seed && uv run uvicorn app.main:app --reload --port 8000
+# 2. dashboard (http://localhost:3000 — open it at localhost, not 127.0.0.1, for CORS)
+cd dashboard && npm install && npm run dev
+# 3. voice agent worker — joins every browser call (LiveKit Cloud dispatch)
+cd agent && cp .env.example .env      # LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET
+uv sync && uv run python src/agent.py dev
 ```
+Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
+
+Terminal-only alternative for the voice side: `uv run python src/agent.py console` talks through your mic with no browser.
 
 Before a demo: `cd backend && uv run python -m scripts.reset_demo` (wipes all tables, reseeds 3 cases). Reset to a clean demo state at any time: `cd backend && uv run python -m scripts.reset_demo`.
 
