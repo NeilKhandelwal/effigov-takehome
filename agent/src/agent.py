@@ -306,7 +306,9 @@ class Assistant(Agent):
             return f"{len(cases)} cases under that number{more}: " + "; ".join(describe_case(c) for c in shown)
         c = cases[0]
         await patch_call(self.call_id, {"case_id": c["id"]})  # link live call to its case
-        return f"{describe_case(c)}, description {c['description']}"
+        issue = c["issue_type"] or "not yet classified"
+        # no filed-date here: it's read aloud on every single-case lookup
+        return f"Case {c['id']}, {issue}, status {c['status']}, description {c['description']}"
 
     @function_tool
     async def add_note(self, context: RunContext, case_id: str, note: str) -> str:

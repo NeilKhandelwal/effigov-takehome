@@ -45,3 +45,5 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 1:36 | resolved the #16/#17 conflicts in a throwaway worktree after a first attempt in the shared checkout briefly took the backend down | the demo tree is never a merge workspace | 6 min
 1:45 | rehearsal 1 on merged main: report + follow-up both clean, summaries written, 6 audit rows in order | - | one prompt line added so the agent states case status on lookup (the follow-up's whole point)
 1:50 | nullable issue_type merged (5b968fd, from closed #17) | a fresh case showed "Other" then flipped — reads as a misroute; "—" then "Pothole" is the brief's own wording | demo DB rebuilt (rm + reset_demo); one verification call
+1:51 | lookup_case lists all cases under a phone (max 3) and asks which; accepts a case ID (PR #18, merged) | one number, many cases was a silent "newest wins" | call isn't linked until the caller picks; ~12 min
+2:00 | after merging #18, dropped the filed-date from the single-case readback | an ISO date read aloud on every follow-up call | -
