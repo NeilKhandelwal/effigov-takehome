@@ -9,3 +9,5 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 0:06 | voice via `agent.py console` (terminal mic) | zero frontend for voice | browser call UI
 0:15 | LLM = openai/gpt-4.1-mini via LiveKit Inference (starter default was gemma-4-31b) | flow hinges on tool calls with a strict issue_type enum | one line to flip back
 0:16 | all three lanes scaffolded in parallel against CONTRACT.md | contract first made backend/dashboard/agent independent | -
+0:18 | core loop verified live: voice -> create_case -> C-1007 in dashboard | - | -
+0:19 | stretch = separate calls + transcript tables, WS pushes {type,id} only, client refetches | a call is not a case; refetch-on-event is idempotent so repeated/out-of-order frames can't corrupt state | payload-carrying WS, one fewer round trip
