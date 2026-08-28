@@ -72,6 +72,9 @@ export default function CaseDetailPage() {
     if (data) setDirty(false);
   };
 
+  // status/issue_type are enums worth prettifying; notes/description are free text
+  const val = (e: CaseEvent, v: string | null) =>
+    !v ? "—" : e.field === "status" || e.field === "issue_type" ? humanize(v) : v;
   const cs = c.data;
   const liveCall = calls.find((k) => k.status === "active");
   const card = "rounded-lg border border-slate-200 bg-white shadow-sm p-4";
@@ -223,7 +226,7 @@ export default function CaseDetailPage() {
                       ) : (
                         <>
                           <span className="text-slate-500">{humanize(e.field)}:</span>{" "}
-                          <span className="text-slate-400 line-through">{e.old_value || "—"}</span> → {e.new_value || "—"}
+                          <span className="text-slate-400 line-through">{val(e, e.old_value)}</span> → {val(e, e.new_value)}
                         </>
                       )}
                     </span>
