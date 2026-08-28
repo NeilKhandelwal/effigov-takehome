@@ -134,14 +134,17 @@ class Assistant(Agent):
                 service request, look up an existing case by phone number, or add a note to a
                 case. Politely decline anything else.
 
-                To file a request, collect one at a time: the caller's name, their phone
-                number, the issue type, and a one-sentence description. If the caller spells
-                their name letter by letter, use exactly the spelled version and drop what you
-                heard before. Only the phone number
-                needs confirming: read the digits back. Do not ask the caller to confirm the
-                name, issue type, or description; just move on to the next question. Map what
-                the caller says onto exactly one of: {ISSUE_TYPES}.
-                Then call create_case and read the case ID back slowly, character by character.
+                To file a request, collect one at a time: the caller's name, then their phone
+                number. If the caller spells their name letter by letter, use exactly the
+                spelled version and drop what you heard before. Only the phone number needs
+                confirming: read the digits back. As soon as the phone number is confirmed,
+                call create_case with the name and phone, then ask what the issue is. Do not
+                mention the case ID yet. The moment you can map what the caller says onto
+                exactly one of {ISSUE_TYPES}, call update_case with that issue_type, then ask
+                for a one-sentence description and call update_case with the description. Do
+                not ask the caller to confirm the name, issue type, or description; just move
+                on. Only after the description is saved, read the case ID back slowly,
+                character by character.
 
                 If the caller asks about an existing case, call lookup_case with the phone
                 number they already gave on this call; only ask for it if you don't have it. To add a note, call add_note with the case ID and the note.
@@ -154,30 +157,23 @@ class Assistant(Agent):
             ),
         )
         self.call_id: str | None = None  # set by the entrypoint once POST /calls succeeds
+        # the case this call created (one Assistant per job, so no reset needed);
+        # update_case uses it so the LLM never has to repeat the ID
+        self.case_id: str | None = None
 
     @function_tool
-    async def create_case(
-        self,
-        context: RunContext,
-        name: str,
-        phone: str,
-        issue_type: str,
-        description: str,
-    ) -> str:
-        """File a new service request. Only call once all four fields have been collected.
+    async def create_case(self, context: RunContext, name: str, phone: str) -> str:
+        """Open a new service request. Call as soon as you have the caller's name and their
+        confirmed phone number, before asking about the issue.
 
         Args:
             name: caller's full name
             phone: caller's phone number
-            issue_type: exactly one of missed_pickup, pothole, streetlight, water, animal, other
-            description: one-sentence description of the problem
         """
-        body = {
-            "name": name,
-            "phone": digits(phone),
-            "issue_type": issue_type,
-            "description": description,
-        }
+        if self.case_id:  # the LLM occasionally re-calls a tool; keep one case per call
+            return f"Case {self.case_id} is already open for this call."
+        # issue_type/description are filled in by update_case as the caller explains
+        body = {"name": name, "phone": digits(phone), "issue_type": "other", "description": ""}
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.post(f"{BACKEND}/cases", json=body)
@@ -186,8 +182,43 @@ class Assistant(Agent):
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("create_case failed")
             return BACKEND_DOWN
+        self.case_id = case_id
         await patch_call(self.call_id, {"case_id": case_id})  # link live call to its case
-        return f"Created case {case_id}"
+        return f"Started case {case_id}"
+
+    @function_tool
+    async def update_case(
+        self,
+        context: RunContext,
+        issue_type: str | None = None,
+        description: str | None = None,
+    ) -> str:
+        """Fill in the issue type or description on the case opened by create_case.
+        Call it as soon as you know each one; you can call it twice.
+
+        Args:
+            issue_type: exactly one of missed_pickup, pothole, streetlight, water, animal, other
+            description: one-sentence description of the problem
+        """
+        if not self.case_id:
+            return "No case is open yet; call create_case with the name and phone first."
+        body = {}
+        if issue_type is not None:
+            if issue_type not in ISSUE_TYPES.split(", "):
+                return f"issue_type must be exactly one of: {ISSUE_TYPES}"
+            body["issue_type"] = issue_type
+        if description is not None:
+            body["description"] = description
+        if not body:
+            return "Nothing to update."
+        try:
+            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
+                r = await client.patch(f"{BACKEND}/cases/{self.case_id}", json=body)
+                r.raise_for_status()
+        except Exception:  # never raise: the agent must say the failure, not crash
+            logger.exception("update_case failed")
+            return BACKEND_DOWN
+        return f"Updated case {self.case_id}"
 
     @function_tool
     async def lookup_case(self, context: RunContext, phone: str) -> str:
