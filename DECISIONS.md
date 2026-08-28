@@ -15,3 +15,5 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 0:26 | scripts/reset_demo wipes + reseeds | every rehearsal and the live demo start from the same 3 cases | -
 0:28 | dashboard grew search/filter + triage panel (user-directed, second session) | search/filter is a listed extra; ~15 min | more UI to defend live
 0:31 | transcript = one line per committed turn (conversation_item_added for both roles), not per STT segment | "925." / "915-7062." were two bubbles; the transcript is what the CTO looks at | ~1s later per user line
+0:38 | demo from the browser: /token endpoint + dashboard /call page, agent in dev mode | screen-share one Chrome tab with audio instead of a terminal | 3 npm deps + livekit-api; console mode kept as fallback
+0:39 | no Docker / hosting | brief says localhost three times; 3 processes + CORS + wss is where a demo breaks at 15:50 | a link the CTO could click

@@ -75,6 +75,7 @@ export type Call = {
   status: "active" | "ended";
   started_at: string;
   ended_at: string | null;
+  room: string | null;
 };
 
 export type TranscriptLine = {
@@ -91,6 +92,16 @@ export const listCalls = (status?: Call["status"]) =>
   request<Call[]>(status ? `/calls?status=${status}` : "/calls");
 export const getCall = (id: string) => request<CallWithTranscript>(`/calls/${id}`);
 export const getCaseCalls = (id: string) => request<CallWithTranscript[]>(`/cases/${id}/calls`);
+
+// ---- Browser call (see ../CONTRACT.md "## Browser call") ----
+
+export type Grant = { token: string; url: string; room: string };
+
+export const getToken = (identity: string) =>
+  request<Grant>(`/token?identity=${encodeURIComponent(identity)}`);
+
+export const listCallsByRoom = (room: string) =>
+  request<Call[]>(`/calls?room=${encodeURIComponent(room)}`);
 
 // ---- Audit log (see ../CONTRACT.md "## Audit") ----
 
