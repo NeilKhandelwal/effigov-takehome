@@ -7,7 +7,7 @@ def test_call_lifecycle_sets_ended_at(client):
     assert r.status_code == 201
     call = r.json()
     assert call == {"id": "CALL-1", "case_id": None, "status": "active",
-                    "started_at": call["started_at"], "ended_at": None}
+                    "started_at": call["started_at"], "ended_at": None, "room": None}
     assert client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"}).status_code == 201
     ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
     assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
@@ -59,3 +59,23 @@ def test_ws_frame_after_write(client):
         client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"})
         assert ws.receive_json() == {"type": "call", "id": "CALL-1"}
         assert ws.receive_json() == {"type": "transcript", "id": "CALL-1"}
+
+
+def test_call_found_by_room(client):
+    """The browser /call page only knows its LiveKit room name; that's how it finds its transcript."""
+    r = client.post("/calls", json={"room": "call-abc123"})
+    assert r.status_code == 201 and r.json()["room"] == "call-abc123"
+    client.post("/calls", json={"room": "call-other"})
+    assert [c["id"] for c in client.get("/calls", params={"room": "call-abc123"}).json()] == ["CALL-1"]
+    assert client.get("/calls", params={"room": "call-abc123", "status": "ended"}).json() == []
+    assert client.get("/calls", params={"room": "nope"}).json() == []
+
+
+def test_token_returns_room_scoped_credentials(client, monkeypatch):
+    """The browser can't hold the API secret, so a wrong-shaped /token response means no call at all."""
+    monkeypatch.setenv("LIVEKIT_URL", "wss://example.livekit.cloud")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "devsecret" * 4)
+    body = client.get("/token", params={"identity": "browser"}).json()
+    assert body["url"] == "wss://example.livekit.cloud"
+    assert body["room"].startswith("call-") and body["token"].count(".") == 2

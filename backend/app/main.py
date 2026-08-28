@@ -1,14 +1,20 @@
 import json
+import os
 import re
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from livekit import api
 
 from app import db
-from app.models import (Call, CallDetail, CallStatus, CallUpdate, Case, CaseCreate, CaseEvent,
-                        CaseUpdate, TranscriptCreate, TranscriptLine)
+from app.models import (Call, CallCreate, CallDetail, CallStatus, CallUpdate, Case, CaseCreate,
+                        CaseEvent, CaseUpdate, TranscriptCreate, TranscriptLine)
+
+load_dotenv(".env")  # LIVEKIT_* for /token; python-dotenv ships with uvicorn[standard]
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -89,6 +95,26 @@ def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/token")
+def token(identity: str) -> dict:
+    """Browser client joins a fresh room; the dev-mode agent is auto-dispatched into it."""
+    url = os.environ.get("LIVEKIT_URL")
+    key = os.environ.get("LIVEKIT_API_KEY")
+    secret = os.environ.get("LIVEKIT_API_SECRET")
+    if not (url and key and secret):
+        raise HTTPException(status_code=500,
+                            detail="LIVEKIT_* env vars not set (see backend/.env.example)")
+    room = "call-" + secrets.token_hex(4)
+    jwt = (
+        api.AccessToken(key, secret)
+        .with_identity(identity)
+        .with_name(identity)
+        .with_grants(api.VideoGrants(room_join=True, room=room))
+        .to_jwt()
+    )
+    return {"token": jwt, "url": url, "room": room}
+
+
 # write endpoints are async so they can await broadcast() after the commit (the `with` exit)
 @app.post("/cases", status_code=201)
 async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> Case:
@@ -159,24 +185,23 @@ def list_case_calls(case_id: str) -> list[CallDetail]:
 
 
 @app.post("/calls", status_code=201)
-async def create_call() -> Call:
+async def create_call(body: CallCreate = CallCreate()) -> Call:
     with db.connect() as conn:
-        cur = conn.execute("INSERT INTO calls (started_at) VALUES (?)", (now(),))
+        cur = conn.execute("INSERT INTO calls (started_at, room) VALUES (?, ?)", (now(), body.room))
         call = fetch_call(conn, cur.lastrowid)
     await broadcast("call", call.id)
     return call
 
 
 @app.get("/calls")
-def list_calls(status: CallStatus | None = None) -> list[Call]:
+def list_calls(status: CallStatus | None = None, room: str | None = None) -> list[Call]:
     sql = "SELECT * FROM calls"
-    params: tuple = ()
-    if status is not None:
-        sql += " WHERE status = ?"
-        params = (status,)
+    filters = {k: v for k, v in (("status", status), ("room", room)) if v is not None}
+    if filters:
+        sql += " WHERE " + " AND ".join(f"{k} = ?" for k in filters)
     sql += " ORDER BY rowid DESC"
     with db.connect() as conn:
-        return [Call(**db.row_to_call(r)) for r in conn.execute(sql, params)]
+        return [Call(**db.row_to_call(r)) for r in conn.execute(sql, tuple(filters.values()))]
 
 
 @app.get("/calls/{call_id}")
