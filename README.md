@@ -65,7 +65,14 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 - **STT mishears names** (Khandelwal → "Kendall Wall"). The agent applies a spelled name, but the first attempt will often be wrong on the transcript.
 - `notes` is replace-on-write; the agent appends client-side (GET then PATCH). Two simultaneous note-writers would race. One agent, one staff user — acceptable here.
+- Notes are a mutable blob sitting beside an append-only event log — two storage models for the same history. A note should be a `case_events` row (`field="note"`, with `source` and `ts`).
 - `PATCH /calls/{id}` re-links silently if `lookup_case` then `create_case` both run on one call; one call → one case is the model.
+  Both `call_linked` events survive in the audit log, but current state keeps only the last one. Production: a `call_cases` join table, or reject the second link.
+- Foreign keys are public-ID strings (`calls.case_id` = `"C-1001"`) and `PRAGMA foreign_keys` is off; integrity is app-enforced by 404-before-write in `main.py`.
+  Production: store row references, derive the public ID in the API layer, turn FKs on.
+- Case `status` has no escalation value, so "needs a human" isn't representable on the case. The warm-transfer branch adds `needs_person` on the *call*; if that doesn't land it's the next value I'd add.
+- The issue-type enum is written out in three places (backend `Literal`, agent prompt, dashboard array) — deliberate under "hardcode it twice", and the third copy is the signal to centralise it.
+- `case_events` only covers case writes: a call's status or summary changing leaves no audit row. Timestamps are second-resolution, so event order relies on `ORDER BY id`.
 - `case_events` has no rows for cases created before the table existed (the three seeded ones).
 - `db.connect()` connections are released by CPython refcounting, not closed explicitly. Fine for one process.
 - The home page does one `GET /calls/{id}` per active call on every refresh (N+1). N is 1 during a demo.
@@ -81,3 +88,6 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 3. **Evaluate the agent, not just run it** — hand-label 20 calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
 4. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
 5. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
+6. **Notes as events** — the first data-model change I'd make: drop the `notes` column, write each note as a `case_events` row. Kills the GET-then-PATCH race in `add_note` and gives every note its own provenance.
+   Not done here because it moves the contract, the agent tool and the dashboard textarea together (~30 min).
+7. **Real references** — row-id foreign keys with `PRAGMA foreign_keys=ON`, and a `call_cases` join table so a call that gets re-linked keeps both cases.
