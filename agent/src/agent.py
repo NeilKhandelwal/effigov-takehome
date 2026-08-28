@@ -42,6 +42,11 @@ def digits(phone: str) -> str:
     return re.sub(r"\D", "", phone)
 
 
+def valid_phone(phone: str) -> bool:
+    # STT sometimes splits a number across turns ("25" + "7062"); refuse to file a partial one
+    return len(digits(phone)) == 10
+
+
 def clean_text(text: str) -> str:
     # expressive TTS mode embeds <expr .../> tags in agent text; the dashboard shouldn't see them
     return re.sub(r"\s+", " ", re.sub(r"<expr[^>]*/>", "", text)).strip()
@@ -172,6 +177,9 @@ class Assistant(Agent):
         """
         if self.case_id:  # the LLM occasionally re-calls a tool; keep one case per call
             return f"Case {self.case_id} is already open for this call."
+        if not valid_phone(phone):
+            n = len(digits(phone))
+            return f"That number has {n} digits; a phone number should have ten. Could you say it again?"
         # issue_type/description are filled in by update_case as the caller explains
         body = {"name": name, "phone": digits(phone), "issue_type": "other", "description": ""}
         try:

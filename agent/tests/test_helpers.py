@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from agent import clean_text, digits
+from agent import clean_text, digits, valid_phone
 
 
 def test_clean_text_strips_expressive_tags():
@@ -21,3 +21,10 @@ def test_digits_normalizes_spoken_phone():
     """Callers say numbers with dots, dashes and spaces; lookup must match what create stored."""
     assert digits("925.915-7062") == "9259157062"
     assert digits("(555) 123 4567") == "5551234567"
+
+
+def test_valid_phone_rejects_partial_numbers():
+    """STT split "25" + "7062" into a 6-digit phone once; a case filed under it can never be looked up."""
+    assert valid_phone("925.915-7062")
+    assert not valid_phone("257062")
+    assert not valid_phone("1 925 915 7062 3")
