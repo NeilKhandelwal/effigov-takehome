@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS transcript (
     ts TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS case_events (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     case_id TEXT NOT NULL,
     field TEXT NOT NULL,
     old_value TEXT,
