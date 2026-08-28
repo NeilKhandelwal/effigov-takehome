@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -9,14 +10,17 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    ConversationItemAddedEvent,
     JobContext,
     RunContext,
     TurnHandlingOptions,
+    UserInputTranscribedEvent,
     cli,
     function_tool,
     inference,
     room_io,
 )
+from livekit.agents.llm import ChatMessage
 from livekit.plugins import ai_coustics
 
 logger = logging.getLogger("agent")
@@ -32,6 +36,52 @@ def digits(phone: str) -> str:
     return re.sub(r"\D", "", phone)
 
 
+def clean_text(text: str) -> str:
+    # expressive TTS mode embeds <expr .../> tags in agent text; the dashboard shouldn't see them
+    return re.sub(r"\s+", " ", re.sub(r"<expr[^>]*/>", "", text)).strip()
+
+
+# Call-record helpers. call_id is None when the backend was down at session start:
+# every helper then no-ops, so the voice call keeps working without the dashboard.
+async def start_call() -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(f"{BACKEND}/calls", json={})
+            r.raise_for_status()
+            return r.json()["id"]
+    except Exception:
+        logger.warning("could not create call record; transcript will not be streamed")
+        return None
+
+
+async def post_line(call_id: str | None, role: str, text: str) -> None:
+    if call_id is None or not text:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(
+                f"{BACKEND}/calls/{call_id}/transcript", json={"role": role, "text": text}
+            )
+            r.raise_for_status()
+    except Exception:
+        logger.warning("post_line failed", exc_info=True)
+
+
+async def patch_call(call_id: str | None, body: dict) -> None:
+    if call_id is None:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.patch(f"{BACKEND}/calls/{call_id}", json=body)
+            r.raise_for_status()
+    except Exception:
+        logger.warning("patch_call failed", exc_info=True)
+
+
+async def end_call(call_id: str | None) -> None:
+    await patch_call(call_id, {"status": "ended"})
+
+
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
@@ -45,8 +95,10 @@ class Assistant(Agent):
                 case. Politely decline anything else.
 
                 To file a request, collect one at a time: the caller's name, their phone
-                number (read the digits back and confirm), the issue type, and a one-sentence
-                description. Map what the caller says onto exactly one of: {ISSUE_TYPES}.
+                number, the issue type, and a one-sentence description. Only the phone number
+                needs confirming: read the digits back. Do not ask the caller to confirm the
+                name, issue type, or description; just move on to the next question. Map what
+                the caller says onto exactly one of: {ISSUE_TYPES}.
                 Then call create_case and read the case ID back slowly, character by character.
 
                 If the caller asks about an existing case, ask for their phone number and call
@@ -58,6 +110,7 @@ class Assistant(Agent):
                 """
             ),
         )
+        self.call_id: str | None = None  # set by the entrypoint once POST /calls succeeds
 
     @function_tool
     async def create_case(
@@ -68,7 +121,7 @@ class Assistant(Agent):
         issue_type: str,
         description: str,
     ) -> str:
-        """File a new service request. Only call after the caller has confirmed all four fields.
+        """File a new service request. Only call once all four fields have been collected.
 
         Args:
             name: caller's full name
@@ -86,10 +139,12 @@ class Assistant(Agent):
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.post(f"{BACKEND}/cases", json=body)
                 r.raise_for_status()
-                return f"Created case {r.json()['id']}"
+                case_id = r.json()["id"]
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("create_case failed")
             return BACKEND_DOWN
+        await patch_call(self.call_id, {"case_id": case_id})  # link live call to its case
+        return f"Created case {case_id}"
 
     @function_tool
     async def lookup_case(self, context: RunContext, phone: str) -> str:
@@ -109,6 +164,7 @@ class Assistant(Agent):
         if not cases:
             return "No case found for that number."
         c = cases[0]  # backend returns newest first
+        await patch_call(self.call_id, {"case_id": c["id"]})  # link live call to its case
         return (
             f"Case {c['id']}, {c['issue_type']}, status {c['status']}, "
             f"description {c['description']}"
@@ -163,8 +219,9 @@ async def city_services(ctx: JobContext):
         expressive=True,
     )
 
+    agent = Assistant()
     await session.start(
-        agent=Assistant(),
+        agent=agent,
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
@@ -174,6 +231,33 @@ async def city_services(ctx: JobContext):
             ),
         ),
     )
+
+    agent.call_id = await start_call()
+
+    # session.on handlers must be sync, so HTTP work runs in a task; the set keeps a
+    # strong reference until done (asyncio only holds tasks weakly, so they could be GC'd)
+    tasks: set[asyncio.Task] = set()
+
+    def spawn(coro):
+        t = asyncio.create_task(coro)
+        tasks.add(t)
+        t.add_done_callback(tasks.discard)
+
+    @session.on("user_input_transcribed")
+    def _on_user(ev: UserInputTranscribedEvent):
+        if ev.is_final:
+            spawn(post_line(agent.call_id, "user", clean_text(ev.transcript)))
+
+    @session.on("conversation_item_added")
+    def _on_item(ev: ConversationItemAddedEvent):
+        # user text already posted above; assistant items arrive here after playout
+        if isinstance(ev.item, ChatMessage) and ev.item.role == "assistant":
+            text = clean_text(ev.item.text_content or "")
+            spawn(post_line(agent.call_id, "agent", text))
+
+    # shutdown callbacks are awaited by the job runner (a session "close" handler isn't),
+    # so the call is reliably marked ended even on Ctrl-C
+    ctx.add_shutdown_callback(lambda: end_call(agent.call_id))
 
     await ctx.connect()
 
