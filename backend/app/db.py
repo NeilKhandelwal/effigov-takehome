@@ -15,7 +15,21 @@ CREATE TABLE IF NOT EXISTS cases (
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-)
+);
+CREATE TABLE IF NOT EXISTS calls (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL,
+    ended_at TEXT
+);
+CREATE TABLE IF NOT EXISTS transcript (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    ts TEXT NOT NULL
+);
 """
 
 
@@ -27,7 +41,7 @@ def connect() -> sqlite3.Connection:
 
 def init_db() -> None:
     with connect() as conn:
-        conn.execute(SCHEMA)
+        conn.executescript(SCHEMA)
 
 
 def case_id(rowid: int) -> str:
@@ -45,4 +59,21 @@ def rowid_of(case_id: str) -> int | None:
 def row_to_case(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["id"] = case_id(d.pop("rowid"))
+    return d
+
+
+def call_id(rowid: int) -> str:
+    return f"CALL-{rowid}"
+
+
+def call_rowid_of(call_id: str) -> int | None:
+    try:
+        return int(call_id.removeprefix("CALL-"))
+    except ValueError:
+        return None
+
+
+def row_to_call(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["id"] = call_id(d.pop("rowid"))
     return d
