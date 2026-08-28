@@ -49,6 +49,18 @@ def valid_phone(phone: str) -> bool:
     return len(digits(phone)) == 10
 
 
+def normalize_case_id(spoken: str) -> str:
+    # callers say "1001", "c 1001" or "c one zero zero one" (the LLM turns words into digits)
+    spoken = spoken.strip().upper()
+    return spoken if spoken.startswith("C-") else "C-" + digits(spoken)
+
+
+def describe_case(c: dict) -> str:
+    # one line per case, so the agent can read a short list back
+    issue = c["issue_type"] or "not yet classified"  # null until the agent classifies it
+    return f"{c['id']}, {issue}, status {c['status']}, filed {c['created_at'][:10]}"
+
+
 def clean_text(text: str) -> str:
     # expressive TTS mode embeds <expr .../> tags in agent text; the dashboard shouldn't see them
     return re.sub(r"\s+", " ", re.sub(r"<expr[^>]*/>", "", text)).strip()
@@ -162,6 +174,9 @@ class Assistant(Agent):
                 was spoken as words ("c one zero zero one" is C-1001); don't ask for the note
                 again. When you find a case, always tell the caller its current status in
                 plain words (open, in progress, or resolved) before anything else about it.
+                If lookup_case returns several cases, read the short list and ask which one
+                they mean, then call lookup_case again with that case ID; a case ID the caller
+                states always wins over the phone number.
 
                 This is a voice call: plain text only, one or two short sentences per reply,
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
@@ -252,28 +267,46 @@ class Assistant(Agent):
         return f"Updated case {self.case_id}"
 
     @function_tool
-    async def lookup_case(self, context: RunContext, phone: str) -> str:
-        """Find the most recent case filed under a phone number.
+    async def lookup_case(
+        self,
+        context: RunContext,
+        phone: str | None = None,
+        case_id: str | None = None,
+    ) -> str:
+        """Find a case by case ID, or the cases filed under a phone number.
 
         Args:
-            phone: caller's phone number
+            phone: caller's phone number (lists every case under it, newest first)
+            case_id: the case ID, like C-1001; wins over phone when the caller states one
         """
+        if not phone and not case_id:
+            return "I need a phone number or a case ID to look up."
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
-                r = await client.get(f"{BACKEND}/cases", params={"phone": digits(phone)})
-                r.raise_for_status()
-                cases = r.json()
+                if case_id:
+                    case_id = normalize_case_id(case_id)
+                    r = await client.get(f"{BACKEND}/cases/{case_id}")
+                    if r.status_code == 404:
+                        return f"No case found with ID {case_id}."
+                    r.raise_for_status()
+                    cases = [r.json()]
+                else:
+                    r = await client.get(f"{BACKEND}/cases", params={"phone": digits(phone or "")})
+                    r.raise_for_status()
+                    cases = r.json()  # backend returns newest first
         except Exception:
             logger.exception("lookup_case failed")
             return BACKEND_DOWN
         if not cases:
             return "No case found for that number."
-        c = cases[0]  # backend returns newest first
+        if len(cases) > 1:
+            # don't guess which one they mean, and don't link the call until they pick
+            shown = cases[:3]
+            more = f" and {len(cases) - 3} older" if len(cases) > 3 else ""
+            return f"{len(cases)} cases under that number{more}: " + "; ".join(describe_case(c) for c in shown)
+        c = cases[0]
         await patch_call(self.call_id, {"case_id": c["id"]})  # link live call to its case
-        return (
-            f"Case {c['id']}, {c['issue_type'] or 'not yet classified'}, status {c['status']}, "
-            f"description {c['description']}"
-        )
+        return f"{describe_case(c)}, description {c['description']}"
 
     @function_tool
     async def add_note(self, context: RunContext, case_id: str, note: str) -> str:
@@ -283,9 +316,7 @@ class Assistant(Agent):
             case_id: the case ID, like C-1001
             note: the note to add
         """
-        case_id = case_id.strip().upper()
-        if not case_id.startswith("C-"):  # caller may say "1001" or "c 1001"
-            case_id = "C-" + digits(case_id)
+        case_id = normalize_case_id(case_id)
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.get(f"{BACKEND}/cases/{case_id}")
