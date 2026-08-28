@@ -216,6 +216,8 @@ async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("st
     changes = body.model_dump(exclude_none=True)
     with db.connect() as conn:
         call = fetch_call(conn, rowid)  # 404 before touching anything
+        if call.status == "ended" and changes.get("status") in ("active", "needs_person"):
+            raise HTTPException(status_code=409, detail="call already ended")
         if "case_id" in changes:
             case = fetch_case(conn, db.rowid_of(changes["case_id"]))  # 404 "case not found"
             log_event(conn, case.id, "call_linked", None, call.id, x_source)

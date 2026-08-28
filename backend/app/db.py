@@ -51,22 +51,19 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def add_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
-        try:
-            # CREATE TABLE IF NOT EXISTS won't add `room` to a calls table that already exists
-            conn.execute("ALTER TABLE calls ADD COLUMN room TEXT")
-        except sqlite3.OperationalError:
-            pass  # duplicate column: already migrated
-        try:
-            conn.execute("ALTER TABLE calls ADD COLUMN summary TEXT")
-        except sqlite3.OperationalError:
-            pass  # duplicate column: already migrated
-        try:
-            conn.execute("ALTER TABLE calls ADD COLUMN transfer_reason TEXT")
-        except sqlite3.OperationalError:
-            pass  # duplicate column: already migrated
+        # CREATE TABLE IF NOT EXISTS won't add these to a calls table that already exists
+        add_column(conn, "calls", "room", "TEXT")
+        add_column(conn, "calls", "summary", "TEXT")
+        add_column(conn, "calls", "transfer_reason", "TEXT")
 
 
 def case_id(rowid: int) -> str:

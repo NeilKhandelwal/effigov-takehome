@@ -13,7 +13,6 @@ import {
   getCall,
   getCase,
   humanize,
-  patchCall,
   track,
   untracked,
   useLiveRefresh,
@@ -26,7 +25,6 @@ export default function CallPage() {
   const [call, setCall] = useState<CallWithTranscript | null>(null);
   const [c, setCase] = useState<Tracked<Case>>(untracked);
   const [error, setError] = useState<string | null>(null);
-  const [pickingUp, setPickingUp] = useState(false);
 
   const load = useCallback(
     () =>
@@ -54,18 +52,6 @@ export default function CallPage() {
   const needsPerson = call?.status === "needs_person";
   const cs = c.data;
 
-  const pickUp = async () => {
-    setPickingUp(true);
-    try {
-      await patchCall(id, { status: "active" });
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPickingUp(false);
-    }
-  };
-
   return (
     <main className="p-6 max-w-6xl mx-auto w-full">
       <Link href="/calls" className="text-sm text-blue-700 hover:underline">
@@ -86,17 +72,8 @@ export default function CallPage() {
             <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 ring-1 ring-slate-200">Ended</span>
           )
         )}
-        {needsPerson && (
-          <>
-            {call?.transfer_reason && <span className="text-sm text-amber-800">{call.transfer_reason}</span>}
-            <button
-              onClick={pickUp}
-              disabled={pickingUp}
-              className="px-2.5 py-1 rounded-md bg-slate-900 text-white text-xs disabled:opacity-40"
-            >
-              Picked up
-            </button>
-          </>
+        {needsPerson && call?.transfer_reason && (
+          <span className="text-sm text-amber-800">{call.transfer_reason}</span>
         )}
         {call && (
           <span className="text-sm text-slate-500">
