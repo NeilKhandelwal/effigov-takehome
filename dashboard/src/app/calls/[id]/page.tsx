@@ -76,6 +76,11 @@ export default function CallPage() {
       {call && (
         <div className="grid md:grid-cols-3 gap-4">
           <section className="md:col-span-2">
+            {call.summary && (
+              <p className="mb-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm italic text-slate-600">
+                {call.summary}
+              </p>
+            )}
             <Transcript lines={call.transcript} className="max-h-[70vh] min-h-64" active={active} />
           </section>
 

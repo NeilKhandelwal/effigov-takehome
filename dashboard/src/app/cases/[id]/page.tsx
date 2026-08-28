@@ -166,6 +166,7 @@ export default function CaseDetailPage() {
                         {new Date(call.started_at).toLocaleString()} · <span className="font-mono">{duration(call.started_at, call.ended_at)}</span>
                       </span>
                     </div>
+                    {call.summary && <p className="mb-1.5 text-sm italic text-slate-600">{call.summary}</p>}
                     <Transcript lines={call.transcript} className="max-h-72" active={call.status === "active"} />
                   </div>
                 ))}

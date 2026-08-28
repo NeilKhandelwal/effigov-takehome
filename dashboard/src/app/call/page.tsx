@@ -184,6 +184,11 @@ function LiveTranscript({ room }: { room: string }) {
           )}
         </span>
       </div>
+      {call.summary && (
+        <p className="mb-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm italic text-slate-600">
+          {call.summary}
+        </p>
+      )}
       <Transcript lines={call.transcript} className="max-h-[60vh] min-h-64" />
     </>
   );
