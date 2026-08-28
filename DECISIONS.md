@@ -43,3 +43,4 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 1:33 | merged #15 (warm transfer + auto hang-up) and #14 (call filters + stats) — user's call over my "leave open" | user judged them demo-worthy; both reviewed, tests green | agent now has 6 tools and can end the room itself; ~20 more UI/backend surface to defend
 1:36 | #16 evals merged; from #17 took AUTOINCREMENT + README bullets, dropped indexes (conflicted with #15's db.py) and nullable issue_type (needs DB rebuild) | keep the demo DB stable | -
 1:36 | resolved the #16/#17 conflicts in a throwaway worktree after a first attempt in the shared checkout briefly took the backend down | the demo tree is never a merge workspace | 6 min
+1:45 | rehearsal 1 on merged main: report + follow-up both clean, summaries written, 6 audit rows in order | - | one prompt line added so the agent states case status on lookup (the follow-up's whole point)
