@@ -23,9 +23,9 @@ One narrow workflow, end to end:
 
 **Real-time.** After every write the backend pushes `{"type": "case"|"call"|"transcript", "id": ...}` on `WS /ws`. The socket carries no payload; clients refetch what they're showing. Refetch is idempotent, so duplicate or out-of-order frames can't corrupt UI state. A 2-second poll stays on as a fallback.
 
-**Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Four function tools: `create_case`, `update_case`, `lookup_case`, `add_note`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
+**Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Six function tools: `create_case`, `update_case`, `lookup_case`, `add_note`, `transfer_to_staff` (flags the call `needs_person` and keeps the line open for staff), `end_call`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
 
-**Does the agent actually work?** `agent/tests/test_scenarios.py` (PR #16) runs 15 hand-labelled scenarios through the real agent and backend and checks which tools it called with what. Score on the shipped prompt: **14/15** on one run — the miss is a "loud neighbours" call the agent opened but never classified as `other` within the scenario's turn budget. Run with `cd agent && uv run pytest -m eval` (LLM calls; deselected by default). The first run and the two failures it found are written up in [agent/evals/RESULTS.md](agent/evals/RESULTS.md).
+**Does the agent actually work?** `agent/tests/test_scenarios.py` runs 15 hand-labelled scenarios through the real agent and backend and checks which tools it called with what. Score on the shipped prompt: **14/15** on one run — the miss is a "loud neighbours" call the agent opened but never classified as `other` within the scenario's turn budget. Run with `cd agent && uv run pytest -m eval` (LLM calls; deselected by default). The first run and the two failures it found are written up in [agent/evals/RESULTS.md](agent/evals/RESULTS.md).
 
 ## Run (three terminals)
 
@@ -61,7 +61,7 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 - **Calls are not cases.** One case gets many calls (the report, the follow-up); a lookup-only call shouldn't create a junk case. Costs a join in two places.
 - **WebSocket frames carry `{type, id}` only.** Clients refetch. Idempotent, so repeated or out-of-order frames can't corrupt UI state. Costs one extra GET per event, trivial here.
 - **Summary is written by the agent at hang-up, not by a backend job.** The agent already holds the chat history and an LLM; the backend stays LLM-free. Calls that don't end cleanly get no summary.
-- **Not built:** supervisory/misinformation agent (a second AI system to defend in a 45-minute call), multilingual, transfer-to-human, auth, pagination.
+- **Not built:** supervisory/misinformation agent (a second AI system to defend in a 45-minute call), multilingual, auth, pagination.
 
 ## Known limitations
 
@@ -82,9 +82,8 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 
 ## What I'd do next
 
-1. **Warm transfer** — a `transfer_to_staff` tool that flips the call to `needs_person`, pushes it to the top of the live strip with the transcript, and tells the caller someone is picking up.
-2. **Evaluate the agent on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
-3. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
-4. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
-5. **Notes as events** — drop the `notes` column, write each note as a `case_events` row. Kills the GET-then-PATCH race in `add_note` and gives every note its own provenance (~30 min: contract, agent tool, dashboard textarea move together).
-6. **Real references** — row-id foreign keys with `PRAGMA foreign_keys=ON`, and a `call_cases` join table so a re-linked call keeps both cases. Nullable `issue_type` (null until classified) is on the `fix/data-model` branch, unmerged: it relaxes a NOT NULL that can't be retrofitted without rebuilding the DB.
+1. **Evaluate the agent on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
+2. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
+3. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
+4. **Notes as events** — drop the `notes` column, write each note as a `case_events` row. Kills the GET-then-PATCH race in `add_note` and gives every note its own provenance (~30 min: contract, agent tool, dashboard textarea move together).
+5. **Real references** — row-id foreign keys with `PRAGMA foreign_keys=ON`, and a `call_cases` join table so a re-linked call keeps both cases. Nullable `issue_type` (null until classified) is on the `fix/data-model` branch, unmerged: it relaxes a NOT NULL that can't be retrofitted without rebuilding the DB.

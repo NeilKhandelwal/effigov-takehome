@@ -59,9 +59,12 @@ CaseEvent: {"id": 3, "case_id": "C-1001", "field": "status", "old_value": "open"
 - `source` = request header `X-Source` (default "staff"). Agent sends `X-Source: voice` on every write.
 
 ## Agent tools (LiveKit function tools, call backend via httpx)
-- create_case(name, phone, issue_type, description) -> "Created case C-1001"
+- create_case(name, phone) -> "Started case C-1001" (opens with issue_type="other", description=""; refuses non-10-digit phones)
+- update_case(issue_type?, description?) -> fills fields on the case this call opened, as the caller explains
 - lookup_case(phone) -> summary of most recent case for that phone, or "none found"
 - add_note(case_id, note) -> appends line to notes
+- transfer_to_staff(reason) -> PATCH call status=needs_person + transfer_reason; line stays open (see "## Warm transfer")
+- end_call() -> after goodbye has played, ends the session (shutdown callback writes summary + status=ended)
 
 ## Ports
 backend :8000, dashboard :3000, agent = console process (no port)
