@@ -9,8 +9,7 @@ SAMPLES = [
     ("Priya Nair", "5555550123", "streetlight", "Streetlight out at Oak St and Pine Ave, dark corner at night"),
 ]
 
-if __name__ == "__main__":
-    db.init_db()
+def seed() -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with db.connect() as conn:
         if conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]:
@@ -22,3 +21,8 @@ if __name__ == "__main__":
                 [(*s, ts, ts) for s in SAMPLES],
             )
             print(f"seeded {len(SAMPLES)} cases")
+
+
+if __name__ == "__main__":
+    db.init_db()
+    seed()
