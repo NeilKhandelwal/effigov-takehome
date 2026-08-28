@@ -73,6 +73,11 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 - Console-mode transcripts have `room: "console"`; the `/call` page only shows browser calls.
 - A call whose worker dies mid-call stays `active` forever — there's no heartbeat or timeout; `reset_demo` is the only fix.
 - The nav opens its own WebSocket on every page just to drive the Live/Polling dot, so each page holds two sockets.
+- Notes are a mutable blob beside an append-only event log — two storage models for one history. A note should be a `case_events` row (`field="note"`, with `source` and `ts`).
+- A call re-linked from one case to another keeps only the last link in current state; both `call_linked` events survive in the audit log.
+- Foreign keys are public-ID strings (`calls.case_id` = `"C-1001"`) and `PRAGMA foreign_keys` is off; integrity is app-enforced by 404-before-write in `main.py`.
+- The issue-type enum is written out in three places (backend `Literal`, agent prompt, dashboard array) — deliberate under "hardcode it twice"; the third copy is the signal to centralise it.
+- `case_events` only covers case writes: a call's status or summary changing leaves no audit row. Timestamps are second-resolution, so event order relies on `ORDER BY id`.
 - The dashboard's 2-second poll is still on as a fallback; the socket makes updates instant, the poll makes them certain.
 
 ## What I'd do next
@@ -81,3 +86,5 @@ The rule was one narrow workflow, working, over surface area. Timestamped log in
 2. **Evaluate the agent on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", run them through the agent, and report **containment** (calls resolved with no human handoff) alongside issue-type accuracy, including where it's wrong. Containment is the number a city actually asks for.
 3. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
 4. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
+5. **Notes as events** — drop the `notes` column, write each note as a `case_events` row. Kills the GET-then-PATCH race in `add_note` and gives every note its own provenance (~30 min: contract, agent tool, dashboard textarea move together).
+6. **Real references** — row-id foreign keys with `PRAGMA foreign_keys=ON`, and a `call_cases` join table so a re-linked call keeps both cases. Nullable `issue_type` (null until classified) is on the `fix/data-model` branch, unmerged: it relaxes a NOT NULL that can't be retrofitted without rebuilding the DB.
