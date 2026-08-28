@@ -153,8 +153,12 @@ class Assistant(Agent):
                 on. Only after the description is saved, read the case ID back slowly,
                 character by character.
 
-                If the caller asks about an existing case, call lookup_case with the phone
-                number they already gave on this call; only ask for it if you don't have it. To add a note, call add_note with the case ID and the note.
+                If the caller asks about an existing case, call lookup_case right away with
+                any phone number they have said on this call, including one said in the same
+                sentence as the request; only ask for it if you have none. To add a note, call
+                add_note as soon as you have a case ID and the note's wording, even if the ID
+                was spoken as words ("c one zero zero one" is C-1001); don't ask for the note
+                again.
 
                 This is a voice call: plain text only, one or two short sentences per reply,
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
