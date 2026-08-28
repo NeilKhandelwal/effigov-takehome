@@ -10,9 +10,9 @@ from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconne
 from fastapi.middleware.cors import CORSMiddleware
 from livekit import api
 
-from app import db
+from app import codes, db
 from app.models import (Call, CallCreate, CallDetail, CallStatus, CallUpdate, Case, CaseCreate,
-                        CaseEvent, CaseUpdate, TranscriptCreate, TranscriptLine)
+                        CaseCreated, CaseEvent, CaseUpdate, TranscriptCreate, TranscriptLine)
 
 load_dotenv(".env")  # LIVEKIT_* for /token; python-dotenv ships with uvicorn[standard]
 
@@ -32,6 +32,9 @@ app.add_middleware(
 
 # module-level set: single-process demo, so every client is in this one process
 clients: set[WebSocket] = set()
+
+# same reason: one process, so this dict is the whole rate limiter. Call id -> wrong codes tried.
+lookup_misses: dict[str, int] = {}
 
 
 async def broadcast(type: str, id: str) -> None:
@@ -117,18 +120,19 @@ def token(identity: str) -> dict:
 
 # write endpoints are async so they can await broadcast() after the commit (the `with` exit)
 @app.post("/cases", status_code=201)
-async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> Case:
+async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> CaseCreated:
     ts = now()
     with db.connect() as conn:
+        code = codes.new_code(conn)
         cur = conn.execute(
-            "INSERT INTO cases (name, phone, issue_type, description, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (body.name, digits(body.phone), body.issue_type, body.description, ts, ts),
+            "INSERT INTO cases (name, phone, issue_type, description, lookup_code, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (body.name, digits(body.phone), body.issue_type, body.description, code, ts, ts),
         )
         case = fetch_case(conn, cur.lastrowid)
         log_event(conn, case.id, "created", None, case.id, x_source)
     await broadcast("case", case.id)
-    return case
+    return CaseCreated(**case.model_dump(), lookup_code=code)
 
 
 @app.get("/cases")
@@ -141,6 +145,26 @@ def list_cases(phone: str | None = None) -> list[Case]:
     sql += " ORDER BY rowid DESC"
     with db.connect() as conn:
         return [Case(**db.row_to_case(r)) for r in conn.execute(sql, params)]
+
+
+# declared before /cases/{case_id}, or FastAPI reads "lookup" as a case id
+@app.get("/cases/lookup")
+async def lookup_by_code(code: str, x_call_id: str = Header(""), x_source: str = Header("staff")) -> Case:
+    """The caller's three spoken words. Unknown and malformed codes get the same 404: no oracle."""
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM cases WHERE lookup_code = ?", (codes.normalize(code),)
+        ).fetchone()
+        if row is None:
+            if x_call_id:
+                lookup_misses[x_call_id] = lookup_misses.get(x_call_id, 0) + 1
+                if lookup_misses[x_call_id] >= 5:
+                    raise HTTPException(status_code=429, detail="too many attempts")
+            raise HTTPException(status_code=404, detail="no case for that code")
+        case = Case(**db.row_to_case(row))  # Case has no lookup_code field, so it can't leak
+        log_event(conn, case.id, "looked_up", None, x_call_id or "voice", x_source)
+    await broadcast("case", case.id)
+    return case
 
 
 @app.get("/cases/{case_id}")

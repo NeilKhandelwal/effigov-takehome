@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS cases (
     phone TEXT NOT NULL,
     issue_type TEXT,  -- NULL = not classified yet (the agent fills it in mid-call)
     description TEXT NOT NULL,
+    lookup_code TEXT,  -- NULL = filed before codes existed; that case can't be looked up by voice
     status TEXT NOT NULL DEFAULT 'open',
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -60,10 +61,11 @@ def add_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> 
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
-        # CREATE TABLE IF NOT EXISTS won't add these to a calls table that already exists
+        # CREATE TABLE IF NOT EXISTS won't add these to a table that already exists
         add_column(conn, "calls", "room", "TEXT")
         add_column(conn, "calls", "summary", "TEXT")
         add_column(conn, "calls", "transfer_reason", "TEXT")
+        add_column(conn, "cases", "lookup_code", "TEXT")
 
 
 def case_id(rowid: int) -> str:
