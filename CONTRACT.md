@@ -65,3 +65,16 @@ CaseEvent: {"id": 3, "case_id": "C-1001", "field": "status", "old_value": "open"
 
 ## Ports
 backend :8000, dashboard :3000, agent = console process (no port)
+
+## Browser call (added 13:28) — demo from the dashboard, not the terminal
+Agent runs in `dev` mode (`uv run python src/agent.py dev`, no `agent_name` → auto-dispatched to every new room).
+Console mode keeps working for local testing.
+- `GET /token?identity=<string>` -> {"token": "<jwt>", "url": LIVEKIT_URL, "room": "call-<8 hex>"}. Backend signs with
+  LIVEKIT_API_KEY/SECRET from backend/.env (dep: livekit-api). Room name is generated per token; grants: roomJoin only.
+- `calls` gains nullable `room TEXT`. `POST /calls` accepts optional {"room": "..."}; the agent sends ctx.room.name.
+  `GET /calls?room=<name>` -> [Call] (exact match). Call JSON includes "room".
+- Dashboard `/call`: "Start call" -> fetch token -> LiveKitRoom (audio only) with RoomAudioRenderer, a voice-assistant
+  bar visualizer, "Hang up" (disconnect). Beside it: the live transcript of the call whose room matches, found via
+  `GET /calls?room=` (poll + WS refresh like everywhere else), with a link to the case once linked.
+  Deps: @livekit/components-react, @livekit/components-styles, livekit-client.
+- Call end: when the browser participant disconnects, the agent job shuts down -> existing end_call marks status=ended.
