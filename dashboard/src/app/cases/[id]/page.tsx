@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   Case,
+  CaseEvent,
   CallWithTranscript,
   ISSUE_TYPES,
   STATUSES,
@@ -15,6 +16,7 @@ import {
   flash,
   getCase,
   getCaseCalls,
+  getCaseEvents,
   humanize,
   patchCase,
   track,
@@ -27,6 +29,7 @@ export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [c, setCase] = useState<Tracked<Case>>(untracked);
   const [calls, setCalls] = useState<CallWithTranscript[]>([]);
+  const [events, setEvents] = useState<CaseEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false); // true while the user has unsaved edits
@@ -43,6 +46,9 @@ export default function CaseDetailPage() {
     getCaseCalls(id)
       .then(setCalls)
       .catch(() => setCalls([]));
+    getCaseEvents(id)
+      .then(setEvents)
+      .catch(() => setEvents([]));
   }, [id, dirty]);
 
   useEffect(() => {
@@ -195,6 +201,36 @@ export default function CaseDetailPage() {
               <div className="flex justify-between"><dt className="text-slate-500">Updated</dt><dd>{new Date(cs.updated_at).toLocaleString()}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Calls</dt><dd>{calls.length}</dd></div>
             </dl>
+            <div className="border-t border-slate-100 pt-3">
+              <h2 className={h2}>History</h2>
+              {events.length === 0 && <p className="text-slate-500 text-xs">No changes recorded.</p>}
+              <ol className="space-y-2 text-xs">
+                {[...events].reverse().map((e) => (
+                  <li key={e.id} className="flex gap-2">
+                    <span className="text-slate-400 font-mono shrink-0">{new Date(e.ts).toLocaleTimeString()}</span>
+                    <span
+                      className={`px-1.5 rounded-full shrink-0 ring-1 ${
+                        e.source === "voice" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-slate-100 text-slate-600 ring-slate-200"
+                      }`}
+                    >
+                      {e.source}
+                    </span>
+                    <span className="min-w-0 break-words">
+                      {e.field === "created" ? (
+                        "Case created"
+                      ) : e.field === "call_linked" ? (
+                        <>Linked {e.new_value}</>
+                      ) : (
+                        <>
+                          <span className="text-slate-500">{humanize(e.field)}:</span>{" "}
+                          <span className="text-slate-400 line-through">{e.old_value || "—"}</span> → {e.new_value || "—"}
+                        </>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           </aside>
         </div>
       )}

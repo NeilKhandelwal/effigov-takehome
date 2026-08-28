@@ -92,6 +92,20 @@ export const listCalls = (status?: Call["status"]) =>
 export const getCall = (id: string) => request<CallWithTranscript>(`/calls/${id}`);
 export const getCaseCalls = (id: string) => request<CallWithTranscript[]>(`/cases/${id}/calls`);
 
+// ---- Audit log (see ../CONTRACT.md "## Audit") ----
+
+export type CaseEvent = {
+  id: number;
+  case_id: string;
+  field: "created" | "status" | "notes" | "issue_type" | "description" | "call_linked";
+  old_value: string | null;
+  new_value: string | null;
+  source: "voice" | "staff";
+  ts: string;
+};
+
+export const getCaseEvents = (id: string) => request<CaseEvent[]>(`/cases/${id}/events`);
+
 // Subscribes to WS /ws and calls refetch() on every frame (frames carry no payload,
 // they just mean "something changed"). Reconnects 2s after close. Callers keep their
 // 2s poll as the fallback when the socket is down. Returns whether the socket is up.
