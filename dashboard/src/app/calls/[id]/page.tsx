@@ -118,7 +118,7 @@ export default function CallPage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Issue</dt>
-                  <dd className={flash(c, "issue_type")}>{humanize(cs.issue_type)}</dd>
+                  <dd className={flash(c, "issue_type")}>{cs.issue_type ? humanize(cs.issue_type) : "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-slate-500 mb-0.5">Description</dt>

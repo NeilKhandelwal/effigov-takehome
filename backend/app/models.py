@@ -11,7 +11,7 @@ Role = Literal["user", "agent"]
 class CaseCreate(BaseModel):
     name: str
     phone: str
-    issue_type: IssueType
+    issue_type: IssueType | None = None
     description: str
 
 
@@ -26,7 +26,7 @@ class Case(BaseModel):
     id: str
     name: str
     phone: str
-    issue_type: IssueType
+    issue_type: IssueType | None
     description: str
     status: Status
     notes: str
