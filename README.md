@@ -47,8 +47,31 @@ Built in the 3-hour window with Claude Code as pair: I set the contract, data mo
 `CONTRACT.md` is the API contract all three parts were built against; `DECISIONS.md` is the timestamped tradeoff log.
 
 ## What I cut and why
-TODO
+
+The rule was one narrow workflow, working, over surface area. Timestamped log in `DECISIONS.md`. The big ones:
+
+- **No deployment, no Docker.** The brief says localhost three times. Three processes plus cross-origin WebSockets is exactly where a demo breaks at the last minute.
+- **One case table, stdlib `sqlite3`, no ORM.** ~12 SQL statements in the whole project; an ORM would be the third abstraction before the second use.
+- **Calls are not cases.** One case gets many calls (the report, the follow-up); a lookup-only call shouldn't create a junk case. Costs a join in two places.
+- **WebSocket frames carry `{type, id}` only.** Clients refetch. Idempotent, so repeated or out-of-order frames can't corrupt UI state. Costs one extra GET per event, trivial here.
+- **Summary is written by the agent at hang-up, not by a backend job.** The agent already holds the chat history and an LLM; the backend stays LLM-free. Calls that don't end cleanly get no summary.
+- **Not built:** supervisory/misinformation agent (a second AI system to defend in a 45-minute call), multilingual, transfer-to-human, auth, pagination.
+
 ## Known limitations
-TODO
+
+- **STT mishears names** (Khandelwal → "Kendall Wall"). The agent now applies a spelled name, but the first attempt will often be wrong on the transcript.
+- `notes` is replace-on-write; the agent appends client-side (GET then PATCH). Two simultaneous note-writers would race. One agent, one staff user — acceptable here.
+- `PATCH /calls/{id}` re-links silently if `lookup_case` then `create_case` both run on one call; one call → one case is the model.
+- `case_events` has no rows for cases created before the table existed (the three seeded ones).
+- `db.connect()` connections are released by CPython refcounting, not closed explicitly. Fine for one process.
+- The home page does one `GET /calls/{id}` per active call on every refresh (N+1). N is 1 during a demo.
+- Console-mode transcripts have `room: "console"`; the `/call` page only shows browser calls.
+- The dashboard's 2-second poll is still on as a fallback; the socket makes updates instant, the poll makes them certain.
+
 ## What I'd do next
-TODO
+
+1. **Progressive case fields** — create the case as soon as name + phone + type are known and update description/status as the call goes on, so staff see fields change mid-call (their "issue type updates once confident" behaviour).
+2. **Warm transfer** — a `transfer_to_staff` tool that flips the call to `needs_person`, pushes it to the top of the live strip with the transcript, and tells the caller someone is picking up.
+3. **Evaluate the agent, not just run it** — hand-label 20 calls for issue type and "should have escalated", run them through the agent, and report accuracy including where it's wrong. That's the number a city would actually ask for.
+4. Replace the 2s poll with WS-only once reconnect handling is proven; add a `since` cursor so refetches after reconnect are cheap.
+5. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
