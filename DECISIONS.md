@@ -44,3 +44,4 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 1:36 | #16 evals merged; from #17 took AUTOINCREMENT + README bullets, dropped indexes (conflicted with #15's db.py) and nullable issue_type (needs DB rebuild) | keep the demo DB stable | -
 1:36 | resolved the #16/#17 conflicts in a throwaway worktree after a first attempt in the shared checkout briefly took the backend down | the demo tree is never a merge workspace | 6 min
 1:45 | rehearsal 1 on merged main: report + follow-up both clean, summaries written, 6 audit rows in order | - | one prompt line added so the agent states case status on lookup (the follow-up's whole point)
+1:50 | nullable issue_type merged (5b968fd, from closed #17) | a fresh case showed "Other" then flipped — reads as a misroute; "—" then "Pothole" is the brief's own wording | demo DB rebuilt (rm + reset_demo); one verification call
