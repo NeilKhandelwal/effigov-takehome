@@ -78,15 +78,17 @@ async def post_line(call_id: str | None, role: str, text: str) -> None:
         logger.warning("post_line failed", exc_info=True)
 
 
-async def patch_call(call_id: str | None, body: dict) -> None:
+async def patch_call(call_id: str | None, body: dict) -> bool:
     if call_id is None:
-        return
+        return False
     try:
         async with httpx.AsyncClient(timeout=5, headers=HEADERS) as client:
             r = await client.patch(f"{BACKEND}/calls/{call_id}", json=body)
             r.raise_for_status()
+            return True
     except Exception:
         logger.warning("patch_call failed", exc_info=True)
+        return False
 
 
 async def end_call(call_id: str | None) -> None:
@@ -165,6 +167,13 @@ class Assistant(Agent):
         # the case this call created (one Assistant per job, so no reset needed);
         # update_case uses it so the LLM never has to repeat the ID
         self.case_id: str | None = None
+        self.call_linked = False  # PATCH /calls/{id} case_id succeeded; retried until it does
+
+    async def _link_call(self) -> None:
+        # idempotent: a failed link right after create_case is retried on the next tool call,
+        # so a transient backend error can't leave the case detached from its call for good
+        if self.case_id and not self.call_linked:
+            self.call_linked = await patch_call(self.call_id, {"case_id": self.case_id})
 
     @function_tool
     async def create_case(self, context: RunContext, name: str, phone: str) -> str:
@@ -176,6 +185,7 @@ class Assistant(Agent):
             phone: caller's phone number
         """
         if self.case_id:  # the LLM occasionally re-calls a tool; keep one case per call
+            await self._link_call()
             return f"Case {self.case_id} is already open for this call."
         if not valid_phone(phone):
             n = len(digits(phone))
@@ -191,7 +201,7 @@ class Assistant(Agent):
             logger.exception("create_case failed")
             return BACKEND_DOWN
         self.case_id = case_id
-        await patch_call(self.call_id, {"case_id": case_id})  # link live call to its case
+        await self._link_call()
         return f"Started case {case_id}"
 
     @function_tool
@@ -226,6 +236,7 @@ class Assistant(Agent):
         except Exception:  # never raise: the agent must say the failure, not crash
             logger.exception("update_case failed")
             return BACKEND_DOWN
+        await self._link_call()
         return f"Updated case {self.case_id}"
 
     @function_tool

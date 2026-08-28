@@ -1,0 +1,66 @@
+"""create_case links the live call to its case; if that PATCH fails, the link is retried later."""
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+import agent as mod
+from agent import Assistant
+
+
+class FakeResponse:
+    status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"id": "C-1001"}
+
+
+class FakeClient:
+    """Stands in for httpx.AsyncClient: every request succeeds."""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        pass
+
+    async def post(self, *a, **kw):
+        return FakeResponse()
+
+    async def patch(self, *a, **kw):
+        return FakeResponse()
+
+
+@pytest.mark.asyncio
+async def test_failed_call_link_is_retried_on_next_tool_call(monkeypatch):
+    """A transient error on the link PATCH must not leave the case detached from its call for
+    the rest of the conversation; the dashboard and audit trail depend on that link."""
+    outcomes = [False, True]  # first link attempt fails, second succeeds
+    linked_with = []
+
+    async def fake_patch_call(call_id, body):
+        linked_with.append((call_id, body))
+        return outcomes.pop(0)
+
+    a = Assistant()  # before patching httpx: the LLM client is built here and needs the real one
+    a.call_id = "CALL-7"
+    monkeypatch.setattr(mod.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(mod, "patch_call", fake_patch_call)
+
+    assert await a.create_case(None, "Ana Ruiz", "555 010 2020") == "Started case C-1001"
+    assert a.case_id == "C-1001" and a.call_linked is False
+
+    assert await a.update_case(None, issue_type="pothole") == "Updated case C-1001"
+    assert a.call_linked is True
+    assert linked_with == [("CALL-7", {"case_id": "C-1001"})] * 2
+
+    # once linked, further tool calls don't PATCH again
+    await a.update_case(None, description="on Main St")
+    assert len(linked_with) == 2
