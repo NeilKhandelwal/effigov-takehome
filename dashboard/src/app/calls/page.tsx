@@ -42,7 +42,8 @@ export default function CallsPage() {
   const ended = calls.filter((c) => c.status === "ended");
   const lengths = ended
     .filter((c) => c.ended_at)
-    .map((c) => (new Date(c.ended_at!).getTime() - new Date(c.started_at).getTime()) / 1000);
+    // clamp like duration() does, so a bad ended_at can't put a negative number in the tile
+    .map((c) => Math.max(0, new Date(c.ended_at!).getTime() - new Date(c.started_at).getTime()) / 1000);
   const avg = lengths.length ? mmss(lengths.reduce((a, b) => a + b, 0) / lengths.length) : "—";
   const summarized = ended.filter((c) => c.summary).length;
 
