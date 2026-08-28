@@ -47,7 +47,7 @@ TranscriptLine: {"id": 12, "call_id": "CALL-7", "role": "user"|"agent", "text": 
   (strip `<expr .../>` tags from agent text); create_case/lookup_case PATCH call.case_id;
   on session close PATCH status=ended.
 
-## Audit (added 13:20)
+## Audit (added 13:17)
 Every case write is logged; the dashboard shows it on case detail.
 ```json
 CaseEvent: {"id": 3, "case_id": "C-1001", "field": "status", "old_value": "open", "new_value": "in_progress",

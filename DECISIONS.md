@@ -12,3 +12,6 @@ Format: `HH:MM | decision | why | what I gave up`  (T0 = 12:53 PDT)
 0:18 | core loop verified live: voice -> create_case -> C-1007 in dashboard | - | -
 0:19 | stretch = separate calls + transcript tables, WS pushes {type,id} only, client refetches | a call is not a case; refetch-on-event is idempotent so repeated/out-of-order frames can't corrupt state | payload-carrying WS, one fewer round trip
 0:27 | audit log = case_events table + X-Source header, not app-level middleware | assignment lists it; ~40 lines, no deps; header is the simplest honest provenance | no events for rows created before the table existed
+0:26 | scripts/reset_demo wipes + reseeds | every rehearsal and the live demo start from the same 3 cases | -
+0:28 | dashboard grew search/filter + triage panel (user-directed, second session) | search/filter is a listed extra; ~15 min | more UI to defend live
+0:31 | transcript = one line per committed turn (conversation_item_added for both roles), not per STT segment | "925." / "915-7062." were two bubbles; the transcript is what the CTO looks at | ~1s later per user line

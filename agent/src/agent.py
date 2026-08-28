@@ -14,7 +14,6 @@ from livekit.agents import (
     JobContext,
     RunContext,
     TurnHandlingOptions,
-    UserInputTranscribedEvent,
     cli,
     function_tool,
     inference,
@@ -107,7 +106,8 @@ class Assistant(Agent):
 
                 This is a voice call: plain text only, one or two short sentences per reply,
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
-                returned. If a tool says the system is unreachable, tell the caller that.
+                returned. If a tool says the system is unreachable, tell the caller that. If asked why
+                you need something, say you need it to file or find the case; don't cite policies.
                 """
             ),
         )
@@ -244,17 +244,13 @@ async def city_services(ctx: JobContext):
         tasks.add(t)
         t.add_done_callback(tasks.discard)
 
-    @session.on("user_input_transcribed")
-    def _on_user(ev: UserInputTranscribedEvent):
-        if ev.is_final:
-            spawn(post_line(agent.call_id, "user", clean_text(ev.transcript)))
-
     @session.on("conversation_item_added")
     def _on_item(ev: ConversationItemAddedEvent):
-        # user text already posted above; assistant items arrive here after playout
-        if isinstance(ev.item, ChatMessage) and ev.item.role == "assistant":
-            text = clean_text(ev.item.text_content or "")
-            spawn(post_line(agent.call_id, "agent", text))
+        # one line per committed turn for both roles (per-segment STT events would
+        # split "925." / "915-7062." into separate lines); assistant items arrive after playout
+        if isinstance(ev.item, ChatMessage) and ev.item.role in ("user", "assistant"):
+            role = "user" if ev.item.role == "user" else "agent"
+            spawn(post_line(agent.call_id, role, clean_text(ev.item.text_content or "")))
 
     # shutdown callbacks are awaited by the job runner (a session "close" handler isn't),
     # so the call is reliably marked ended even on Ctrl-C

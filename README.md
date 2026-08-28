@@ -36,7 +36,9 @@ cd agent && cp .env.example .env   # fill LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKI
 uv sync && uv run python src/agent.py console
 ```
 
-Reset to a clean demo state at any time: `cd backend && uv run python -m scripts.reset_demo`.
+Before a demo: `cd backend && uv run python -m scripts.reset_demo` (wipes all tables, reseeds 3 cases). Reset to a clean demo state at any time: `cd backend && uv run python -m scripts.reset_demo`.
+
+Built in the 3-hour window with Claude Code as pair: I set the contract, data model, and every design decision (see `DECISIONS.md`); agents executed lanes against `CONTRACT.md` in parallel and I reviewed, tested, and committed each one.
 
 `CONTRACT.md` is the API contract all three parts were built against; `DECISIONS.md` is the timestamped tradeoff log.
 
