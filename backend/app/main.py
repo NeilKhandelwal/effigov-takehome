@@ -3,12 +3,12 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import db
-from app.models import (Call, CallDetail, CallStatus, CallUpdate, Case, CaseCreate, CaseUpdate,
-                        TranscriptCreate, TranscriptLine)
+from app.models import (Call, CallDetail, CallStatus, CallUpdate, Case, CaseCreate, CaseEvent,
+                        CaseUpdate, TranscriptCreate, TranscriptLine)
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -77,6 +77,13 @@ def with_transcript(conn, call: Call) -> CallDetail:
     return CallDetail(**call.model_dump(), transcript=[TranscriptLine(**dict(r)) for r in rows])
 
 
+def log_event(conn, case_id: str, field: str, old: str | None, new: str | None, source: str) -> None:
+    conn.execute(
+        "INSERT INTO case_events (case_id, field, old_value, new_value, source, ts) VALUES (?, ?, ?, ?, ?, ?)",
+        (case_id, field, old, new, source, now()),
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
@@ -84,7 +91,7 @@ def health() -> dict:
 
 # write endpoints are async so they can await broadcast() after the commit (the `with` exit)
 @app.post("/cases", status_code=201)
-async def create_case(body: CaseCreate) -> Case:
+async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> Case:
     ts = now()
     with db.connect() as conn:
         cur = conn.execute(
@@ -93,6 +100,7 @@ async def create_case(body: CaseCreate) -> Case:
             (body.name, digits(body.phone), body.issue_type, body.description, ts, ts),
         )
         case = fetch_case(conn, cur.lastrowid)
+        log_event(conn, case.id, "created", None, case.id, x_source)
     await broadcast("case", case.id)
     return case
 
@@ -116,11 +124,15 @@ def get_case(case_id: str) -> Case:
 
 
 @app.patch("/cases/{case_id}")
-async def update_case(case_id: str, body: CaseUpdate) -> Case:
+async def update_case(case_id: str, body: CaseUpdate, x_source: str = Header("staff")) -> Case:
     rowid = db.rowid_of(case_id)
     changes = body.model_dump(exclude_none=True)
     with db.connect() as conn:
-        fetch_case(conn, rowid)  # 404 before touching anything
+        before = fetch_case(conn, rowid)  # 404 before touching anything
+        for field, new in changes.items():
+            old = getattr(before, field)
+            if old != new:  # re-sending the same value is not a change worth auditing
+                log_event(conn, before.id, field, old, new, x_source)
         if changes:
             changes["updated_at"] = now()
             sets = ", ".join(f"{k} = ?" for k in changes)
@@ -128,6 +140,14 @@ async def update_case(case_id: str, body: CaseUpdate) -> Case:
         case = fetch_case(conn, rowid)
     await broadcast("case", case.id)
     return case
+
+
+@app.get("/cases/{case_id}/events")
+def list_case_events(case_id: str) -> list[CaseEvent]:
+    with db.connect() as conn:
+        case = fetch_case(conn, db.rowid_of(case_id))
+        rows = conn.execute("SELECT * FROM case_events WHERE case_id = ? ORDER BY id", (case.id,))
+        return [CaseEvent(**dict(r)) for r in rows]
 
 
 @app.get("/cases/{case_id}/calls")
@@ -166,13 +186,14 @@ def get_call(call_id: str) -> CallDetail:
 
 
 @app.patch("/calls/{call_id}")
-async def update_call(call_id: str, body: CallUpdate) -> Call:
+async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("staff")) -> Call:
     rowid = db.call_rowid_of(call_id)
     changes = body.model_dump(exclude_none=True)
     with db.connect() as conn:
-        fetch_call(conn, rowid)  # 404 before touching anything
+        call = fetch_call(conn, rowid)  # 404 before touching anything
         if "case_id" in changes:
-            fetch_case(conn, db.rowid_of(changes["case_id"]))  # 404 "case not found"
+            case = fetch_case(conn, db.rowid_of(changes["case_id"]))  # 404 "case not found"
+            log_event(conn, case.id, "call_linked", None, call.id, x_source)
         if changes.get("status") == "ended":
             changes["ended_at"] = now()
         if changes:

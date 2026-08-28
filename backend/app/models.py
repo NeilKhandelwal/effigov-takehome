@@ -62,3 +62,13 @@ class TranscriptLine(BaseModel):
 
 class CallDetail(Call):
     transcript: list[TranscriptLine]
+
+
+class CaseEvent(BaseModel):
+    id: int
+    case_id: str
+    field: str
+    old_value: str | None
+    new_value: str | None
+    source: str
+    ts: str

@@ -47,6 +47,17 @@ TranscriptLine: {"id": 12, "call_id": "CALL-7", "role": "user"|"agent", "text": 
   (strip `<expr .../>` tags from agent text); create_case/lookup_case PATCH call.case_id;
   on session close PATCH status=ended.
 
+## Audit (added 13:20)
+Every case write is logged; the dashboard shows it on case detail.
+```json
+CaseEvent: {"id": 3, "case_id": "C-1001", "field": "status", "old_value": "open", "new_value": "in_progress",
+            "source": "voice", "ts": "...Z"}
+```
+- `GET /cases/{id}/events` -> [CaseEvent] oldest first | 404
+- Written by: POST /cases (field="created", new_value=case id); PATCH /cases/{id} (one per field that
+  actually changed; unchanged fields skipped); PATCH /calls/{id} with case_id (field="call_linked", new_value=call id).
+- `source` = request header `X-Source` (default "staff"). Agent sends `X-Source: voice` on every write.
+
 ## Agent tools (LiveKit function tools, call backend via httpx)
 - create_case(name, phone, issue_type, description) -> "Created case C-1001"
 - lookup_case(phone) -> summary of most recent case for that phone, or "none found"
