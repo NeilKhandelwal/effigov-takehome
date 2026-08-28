@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS cases (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
-    issue_type TEXT NOT NULL,
+    issue_type TEXT,  -- NULL = not classified yet (the agent fills it in mid-call)
     description TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'open',
     notes TEXT NOT NULL DEFAULT '',

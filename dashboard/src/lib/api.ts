@@ -9,7 +9,7 @@ export type Case = {
   id: string;
   name: string;
   phone: string;
-  issue_type: string;
+  issue_type: string | null;
   description: string;
   status: Status;
   notes: string;

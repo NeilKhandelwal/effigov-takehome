@@ -208,7 +208,7 @@ export default function CasesPage() {
                   )}
                 </td>
                 <td className="py-2.5 px-4">{c.name}</td>
-                <td className="py-2.5 px-4">{humanize(c.issue_type)}</td>
+                <td className="py-2.5 px-4">{c.issue_type ? humanize(c.issue_type) : "—"}</td>
                 <td className="py-2.5 px-4">
                   <span className={`px-2 py-0.5 rounded-full text-xs ring-1 ${STATUS_COLOR[c.status]}`}>
                     {humanize(c.status)}

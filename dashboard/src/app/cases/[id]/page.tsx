@@ -118,7 +118,7 @@ export default function CaseDetailPage() {
                 <dt className="text-slate-500">Phone</dt>
                 <dd className={`font-mono text-xs self-center ${flash(c, "phone")}`}>{cs.phone}</dd>
                 <dt className="text-slate-500">Issue</dt>
-                <dd className={flash(c, "issue_type")}>{humanize(cs.issue_type)}</dd>
+                <dd className={flash(c, "issue_type")}>{cs.issue_type ? humanize(cs.issue_type) : "—"}</dd>
                 <dt className="text-slate-500">Description</dt>
                 <dd className={flash(c, "description")}>{cs.description}</dd>
               </dl>
@@ -207,10 +207,12 @@ export default function CaseDetailPage() {
               <label className="block text-slate-500 text-xs mb-1" htmlFor="issue">Issue type</label>
               <select
                 id="issue"
-                value={cs.issue_type}
+                value={cs.issue_type ?? ""}
                 onChange={(e) => update({ issue_type: e.target.value })}
                 className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5"
               >
+                {/* only shown until the agent or staff classifies; not selectable back */}
+                <option value="" disabled>Not classified</option>
                 {ISSUE_TYPES.map((s) => (
                   <option key={s} value={s}>{humanize(s)}</option>
                 ))}

@@ -203,7 +203,7 @@ class Assistant(Agent):
             n = len(digits(phone))
             return f"That number has {n} digits; a phone number should have ten. Could you say it again?"
         # issue_type/description are filled in by update_case as the caller explains
-        body = {"name": name, "phone": digits(phone), "issue_type": "other", "description": ""}
+        body = {"name": name, "phone": digits(phone), "issue_type": None, "description": ""}
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 r = await client.post(f"{BACKEND}/cases", json=body)
@@ -271,7 +271,7 @@ class Assistant(Agent):
         c = cases[0]  # backend returns newest first
         await patch_call(self.call_id, {"case_id": c["id"]})  # link live call to its case
         return (
-            f"Case {c['id']}, {c['issue_type']}, status {c['status']}, "
+            f"Case {c['id']}, {c['issue_type'] or 'not yet classified'}, status {c['status']}, "
             f"description {c['description']}"
         )
 

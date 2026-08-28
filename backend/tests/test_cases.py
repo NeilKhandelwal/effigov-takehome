@@ -49,3 +49,16 @@ def test_patch_invalid_status_is_422(client):
     client.post("/cases", json=BODY)
     assert client.patch("/cases/C-1001", json={"status": "done"}).status_code == 422
     assert client.patch("/cases/C-9999", json={"status": "resolved"}).status_code == 404
+
+
+def test_issue_type_is_null_until_classified(client):
+    """The agent opens a case before it knows the type; null must survive the round trip so the
+    dashboard shows "not classified yet" instead of flashing a wrong "Other"."""
+    body = {k: v for k, v in BODY.items() if k != "issue_type"}
+    r = client.post("/cases", json=body)
+    assert r.status_code == 201 and r.json()["issue_type"] is None
+    assert client.get("/cases").json()[0]["issue_type"] is None
+
+    assert client.patch("/cases/C-1001", json={"issue_type": "pothole"}).json()["issue_type"] == "pothole"
+    ev = [e for e in client.get("/cases/C-1001/events").json() if e["field"] == "issue_type"]
+    assert len(ev) == 1 and ev[0]["old_value"] is None and ev[0]["new_value"] == "pothole"

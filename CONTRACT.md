@@ -9,6 +9,7 @@ Backend on http://localhost:8000. JSON everywhere. Errors: 404 {"detail": "..."}
   "name": "Maria Lopez",
   "phone": "5551234567",       // digits only, stored as given after stripping non-digits
   "issue_type": "missed_pickup", // one of: missed_pickup | pothole | streetlight | water | animal | other
+                               // null until classified — the agent opens the case before it knows the type
   "description": "Trash not collected on Elm St Tuesday",
   "status": "open",            // open | in_progress | resolved
   "notes": "",                 // free text, appended to by agent/staff
@@ -18,7 +19,7 @@ Backend on http://localhost:8000. JSON everywhere. Errors: 404 {"detail": "..."}
 ```
 
 ## Endpoints
-- `POST /cases` body {name, phone, issue_type, description} -> 201 Case (status=open, notes="")
+- `POST /cases` body {name, phone, description, optional issue_type} -> 201 Case (status=open, notes="", issue_type=null if omitted)
 - `GET /cases` -> [Case], newest first. Optional `?phone=` (digits) filters exact match.
 - `GET /cases/{id}` -> Case | 404
 - `PATCH /cases/{id}` body any of {status, notes, issue_type, description} -> Case | 404
