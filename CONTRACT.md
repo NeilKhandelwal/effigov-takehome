@@ -98,3 +98,8 @@ Console mode keeps working for local testing.
 - Dashboard: the home "Live calls" strip shows needs_person calls first with an amber "Needs a person" banner
   (plus the reason); /calls and /calls/[id] show an amber badge, and /calls/[id] has a "Picked up" button
   that PATCHes the call back to active.
+
+## Auto hang-up (added 14:20) — the agent drops the line after goodbye
+- Agent tool `end_call()` -> waits for the goodbye to finish playing, 2.5 s grace, then deletes the LiveKit
+  room (`DeleteRoomRequest`). No backend write: the browser disconnect drives the normal shutdown path
+  (summary, then PATCH status=ended), so the call is marked ended exactly once. Never used after a transfer.
