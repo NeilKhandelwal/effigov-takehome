@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 IssueType = Literal["missed_pickup", "pothole", "streetlight", "water", "animal", "other"]
 Status = Literal["open", "in_progress", "resolved"]
+CallStatus = Literal["active", "ended"]
+Role = Literal["user", "agent"]
 
 
 class CaseCreate(BaseModel):
@@ -30,3 +32,33 @@ class Case(BaseModel):
     notes: str
     created_at: str
     updated_at: str
+
+
+class CallUpdate(BaseModel):
+    status: CallStatus | None = None
+    case_id: str | None = None
+
+
+class Call(BaseModel):
+    id: str
+    case_id: str | None
+    status: CallStatus
+    started_at: str
+    ended_at: str | None
+
+
+class TranscriptCreate(BaseModel):
+    role: Role
+    text: str
+
+
+class TranscriptLine(BaseModel):
+    id: int
+    call_id: str
+    role: Role
+    text: str
+    ts: str
+
+
+class CallDetail(Call):
+    transcript: list[TranscriptLine]

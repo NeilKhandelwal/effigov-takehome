@@ -1,12 +1,14 @@
+import json
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import db
-from app.models import Case, CaseCreate, CaseUpdate
+from app.models import (Call, CallDetail, CallStatus, CallUpdate, Case, CaseCreate, CaseUpdate,
+                        TranscriptCreate, TranscriptLine)
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -21,6 +23,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# module-level set: single-process demo, so every client is in this one process
+clients: set[WebSocket] = set()
+
+
+async def broadcast(type: str, id: str) -> None:
+    frame = json.dumps({"type": type, "id": id})
+    for ws in list(clients):
+        try:
+            await ws.send_text(frame)
+        except Exception:
+            clients.discard(ws)  # dead socket; drop it and keep going
+
+
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket):
+    await ws.accept()
+    clients.add(ws)
+    try:
+        while True:
+            await ws.receive_text()  # clients never send; this just parks until disconnect
+    except WebSocketDisconnect:
+        pass
+    finally:
+        clients.discard(ws)
 
 
 def now() -> str:
@@ -38,13 +65,26 @@ def fetch_case(conn, rowid: int | None) -> Case:
     return Case(**db.row_to_case(row))
 
 
+def fetch_call(conn, rowid: int | None) -> Call:
+    row = conn.execute("SELECT * FROM calls WHERE rowid = ?", (rowid,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="call not found")
+    return Call(**db.row_to_call(row))
+
+
+def with_transcript(conn, call: Call) -> CallDetail:
+    rows = conn.execute("SELECT * FROM transcript WHERE call_id = ? ORDER BY id", (call.id,))
+    return CallDetail(**call.model_dump(), transcript=[TranscriptLine(**dict(r)) for r in rows])
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
 
 
+# write endpoints are async so they can await broadcast() after the commit (the `with` exit)
 @app.post("/cases", status_code=201)
-def create_case(body: CaseCreate) -> Case:
+async def create_case(body: CaseCreate) -> Case:
     ts = now()
     with db.connect() as conn:
         cur = conn.execute(
@@ -52,7 +92,9 @@ def create_case(body: CaseCreate) -> Case:
             "VALUES (?, ?, ?, ?, ?, ?)",
             (body.name, digits(body.phone), body.issue_type, body.description, ts, ts),
         )
-        return fetch_case(conn, cur.lastrowid)
+        case = fetch_case(conn, cur.lastrowid)
+    await broadcast("case", case.id)
+    return case
 
 
 @app.get("/cases")
@@ -74,7 +116,7 @@ def get_case(case_id: str) -> Case:
 
 
 @app.patch("/cases/{case_id}")
-def update_case(case_id: str, body: CaseUpdate) -> Case:
+async def update_case(case_id: str, body: CaseUpdate) -> Case:
     rowid = db.rowid_of(case_id)
     changes = body.model_dump(exclude_none=True)
     with db.connect() as conn:
@@ -83,4 +125,73 @@ def update_case(case_id: str, body: CaseUpdate) -> Case:
             changes["updated_at"] = now()
             sets = ", ".join(f"{k} = ?" for k in changes)
             conn.execute(f"UPDATE cases SET {sets} WHERE rowid = ?", (*changes.values(), rowid))
-        return fetch_case(conn, rowid)
+        case = fetch_case(conn, rowid)
+    await broadcast("case", case.id)
+    return case
+
+
+@app.get("/cases/{case_id}/calls")
+def list_case_calls(case_id: str) -> list[CallDetail]:
+    with db.connect() as conn:
+        case = fetch_case(conn, db.rowid_of(case_id))
+        rows = conn.execute("SELECT * FROM calls WHERE case_id = ? ORDER BY rowid", (case.id,)).fetchall()
+        return [with_transcript(conn, Call(**db.row_to_call(r))) for r in rows]
+
+
+@app.post("/calls", status_code=201)
+async def create_call() -> Call:
+    with db.connect() as conn:
+        cur = conn.execute("INSERT INTO calls (started_at) VALUES (?)", (now(),))
+        call = fetch_call(conn, cur.lastrowid)
+    await broadcast("call", call.id)
+    return call
+
+
+@app.get("/calls")
+def list_calls(status: CallStatus | None = None) -> list[Call]:
+    sql = "SELECT * FROM calls"
+    params: tuple = ()
+    if status is not None:
+        sql += " WHERE status = ?"
+        params = (status,)
+    sql += " ORDER BY rowid DESC"
+    with db.connect() as conn:
+        return [Call(**db.row_to_call(r)) for r in conn.execute(sql, params)]
+
+
+@app.get("/calls/{call_id}")
+def get_call(call_id: str) -> CallDetail:
+    with db.connect() as conn:
+        return with_transcript(conn, fetch_call(conn, db.call_rowid_of(call_id)))
+
+
+@app.patch("/calls/{call_id}")
+async def update_call(call_id: str, body: CallUpdate) -> Call:
+    rowid = db.call_rowid_of(call_id)
+    changes = body.model_dump(exclude_none=True)
+    with db.connect() as conn:
+        fetch_call(conn, rowid)  # 404 before touching anything
+        if "case_id" in changes:
+            fetch_case(conn, db.rowid_of(changes["case_id"]))  # 404 "case not found"
+        if changes.get("status") == "ended":
+            changes["ended_at"] = now()
+        if changes:
+            sets = ", ".join(f"{k} = ?" for k in changes)
+            conn.execute(f"UPDATE calls SET {sets} WHERE rowid = ?", (*changes.values(), rowid))
+        call = fetch_call(conn, rowid)
+    await broadcast("call", call.id)
+    return call
+
+
+@app.post("/calls/{call_id}/transcript", status_code=201)
+async def add_transcript(call_id: str, body: TranscriptCreate) -> TranscriptLine:
+    with db.connect() as conn:
+        call = fetch_call(conn, db.call_rowid_of(call_id))
+        cur = conn.execute(
+            "INSERT INTO transcript (call_id, role, text, ts) VALUES (?, ?, ?, ?)",
+            (call.id, body.role, body.text, now()),
+        )
+        row = conn.execute("SELECT * FROM transcript WHERE id = ?", (cur.lastrowid,)).fetchone()
+        line = TranscriptLine(**dict(row))
+    await broadcast("transcript", call.id)
+    return line
