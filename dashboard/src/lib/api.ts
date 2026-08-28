@@ -75,6 +75,7 @@ export type Call = {
   status: "active" | "ended";
   started_at: string;
   ended_at: string | null;
+  summary?: string | null; // written by the agent on hang-up (CONTRACT "## Summary")
   room: string | null;
 };
 
@@ -159,9 +160,29 @@ export function track<T extends object>(prev: Tracked<T>, data: T): Tracked<T> {
   const keys = before
     ? Object.keys(data).filter((k) => k !== "updated_at" && (data as Record<string, unknown>)[k] !== before[k])
     : [];
-  if (keys.length) return { data, changed: new Set(keys), at: Date.now() };
+  return { data, ...since(prev, keys) };
+}
+
+// Shared by both trackers: a fresh change wins, otherwise the last set stays alive ~2.5s
+// so the flash survives the refetches that land during it.
+function since(prev: { changed: Set<string>; at: number }, keys: string[]) {
+  if (keys.length) return { changed: new Set(keys), at: Date.now() };
   const fresh = Date.now() - prev.at < 2500;
-  return { data, changed: fresh ? prev.changed : new Set(), at: prev.at };
+  return { changed: fresh ? prev.changed : new Set<string>(), at: prev.at };
+}
+
+// Same idea one level up: which rows in a list are new or have a newer updated_at.
+// changed holds row ids. Nothing flashes on the first load.
+export type TrackedList<T> = { data: T[]; changed: Set<string>; at: number };
+export const untrackedList = <T,>(): TrackedList<T> => ({ data: [], changed: new Set(), at: 0 });
+
+export function trackList<T extends { id: string; updated_at: string }>(
+  prev: TrackedList<T>,
+  data: T[],
+): TrackedList<T> {
+  const before = new Map(prev.data.map((r) => [r.id, r.updated_at]));
+  const keys = before.size ? data.filter((r) => before.get(r.id) !== r.updated_at).map((r) => r.id) : [];
+  return { data, ...since(prev, keys) };
 }
 
 export const flash = (t: Tracked<unknown>, key: string) =>
