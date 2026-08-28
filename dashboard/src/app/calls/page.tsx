@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Call, ago, duration, listCalls, useLiveRefresh } from "@/lib/api";
+import { Call, ago, duration, listCalls, useLiveRefresh, useNow } from "@/lib/api";
 
 export default function CallsPage() {
   const [calls, setCalls] = useState<Call[]>([]);
@@ -25,6 +25,7 @@ export default function CallsPage() {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
+  useNow(); // durations tick every second, not only when data arrives
 
   return (
     <main className="p-6 max-w-6xl mx-auto w-full">

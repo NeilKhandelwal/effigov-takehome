@@ -18,6 +18,7 @@ import {
   trackList,
   untrackedList,
   useLiveRefresh,
+  useNow,
 } from "@/lib/api";
 
 export default function CasesPage() {
@@ -49,6 +50,7 @@ export default function CasesPage() {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
+  useNow(); // durations tick every second, not only when data arrives
 
   const onCall = new Set(live.map((c) => c.case_id).filter(Boolean));
   const rows = cases.data;

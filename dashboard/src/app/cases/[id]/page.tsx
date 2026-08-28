@@ -22,6 +22,7 @@ import {
   track,
   untracked,
   useLiveRefresh,
+  useNow,
 } from "@/lib/api";
 import Transcript from "@/components/Transcript";
 
@@ -57,6 +58,7 @@ export default function CaseDetailPage() {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
+  useNow(); // durations tick every second, not only when data arrives
 
   const update = (body: Partial<Case>) =>
     patchCase(id, body)

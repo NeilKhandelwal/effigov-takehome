@@ -16,6 +16,7 @@ import {
   track,
   untracked,
   useLiveRefresh,
+  useNow,
 } from "@/lib/api";
 import Transcript from "@/components/Transcript";
 
@@ -44,6 +45,7 @@ export default function CallPage() {
     return () => clearInterval(timer);
   }, [load]);
   useLiveRefresh(load);
+  useNow(); // durations tick every second, not only when data arrives
 
   const active = call?.status === "active";
   const cs = c.data;

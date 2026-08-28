@@ -187,3 +187,14 @@ export function trackList<T extends { id: string; updated_at: string }>(
 
 export const flash = (t: Tracked<unknown>, key: string) =>
   `rounded px-1 -mx-1 transition-colors duration-700 ${t.changed.has(key) ? "bg-amber-100 ring-1 ring-amber-300" : ""}`;
+
+// Re-renders the caller once a second so elapsed-time labels (duration()) keep ticking
+// between fetches. Returns the tick in case a caller wants the timestamp itself.
+export function useNow(ms = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(timer);
+  }, [ms]);
+  return now;
+}
