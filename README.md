@@ -93,7 +93,7 @@ The rule was one narrow workflow, working, over surface area. The big ones:
 - Foreign keys are public-ID strings (`calls.case_id` = `"C-1001"`) and `PRAGMA foreign_keys` is off; integrity is app-enforced by 404-before-write in `main.py`.
 - The issue-type enum is written out in three places (backend `Literal`, agent prompt, dashboard array) — deliberate under "hardcode it twice"; the third copy is the signal to centralise it.
 - `case_events` only covers case writes: a call's status or summary changing leaves no audit row. Timestamps are second-resolution, so event order relies on `ORDER BY id`.
-- The dashboard's 2-second poll is still on as a fallback; the socket makes updates instant, the poll makes them certain.
+- The dashboard's 2-second poll is still on as a fallback; the socket makes updates instant, the poll makes them certain — but it runs even when the socket is healthy (see next steps).
 
 ## What I'd do next
 
@@ -103,4 +103,5 @@ The rule was one narrow workflow, working, over surface area. The big ones:
 4. **Finish the warm transfer** — a staff token and a `/staff/join` page so a person actually enters the room and the agent mutes; today the call is flagged, the transcript is live, but nobody picks up.
 5. **Evaluate on real calls** — hand-label 20 recorded calls for issue type and "should have escalated", and report containment (resolved with no human) alongside accuracy. The scenario suite is the offline version of this.
 6. **Notes as events** — drop the `notes` column; each note becomes a `case_events` row with its own provenance, killing the GET-then-PATCH race in `add_note`.
-7. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
+7. **Make the 2s poll a real fallback, not a second channel** — `useLiveRefresh` already knows when the socket is up; move the interval into the hook so it polls only while disconnected, and refetch once on every socket `open` so a reconnect catches up immediately. Drops six copies of `setInterval(load, 2000)` and nearly all idle traffic (the home page does 1+N GETs per tick today) with the same guarantees; then a `since` cursor on the list endpoints so a refetch after a long disconnect is cheap. ~15 lines, not done because it touches every page after the freeze. For one-way "something changed" pings, SSE would have been the simpler primitive (native reconnect, no client code); WebSocket was chosen because the brief and their stack say WebSocket.
+8. Real telephony (Twilio SIP into the same LiveKit room) — the agent code doesn't change.
