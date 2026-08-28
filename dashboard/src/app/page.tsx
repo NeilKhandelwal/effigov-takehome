@@ -8,17 +8,20 @@ import {
   STATUSES,
   STATUS_COLOR,
   Status,
+  TrackedList,
   ago,
   duration,
   getCall,
   humanize,
   listCalls,
   listCases,
+  trackList,
+  untrackedList,
   useLiveRefresh,
 } from "@/lib/api";
 
 export default function CasesPage() {
-  const [cases, setCases] = useState<Case[]>([]);
+  const [cases, setCases] = useState<TrackedList<Case>>(untrackedList);
   const [live, setLive] = useState<CallWithTranscript[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState("");
@@ -28,7 +31,7 @@ export default function CasesPage() {
   const load = useCallback(() => {
     listCases()
       .then((data) => {
-        setCases(data);
+        setCases((prev) => trackList(prev, data));
         setError(null);
         setRefreshedAt(new Date().toLocaleTimeString());
       })
@@ -48,9 +51,10 @@ export default function CasesPage() {
   useLiveRefresh(load);
 
   const onCall = new Set(live.map((c) => c.case_id).filter(Boolean));
-  const count = (s: Status) => cases.filter((c) => c.status === s).length;
+  const rows = cases.data;
+  const count = (s: Status) => rows.filter((c) => c.status === s).length;
   const needle = q.trim().toLowerCase();
-  const shown = cases.filter(
+  const shown = rows.filter(
     (c) =>
       (filter === "all" || c.status === filter) &&
       (!needle || [c.id, c.name, c.phone, c.issue_type, c.description].join(" ").toLowerCase().includes(needle)),
@@ -162,7 +166,12 @@ export default function CasesPage() {
           </thead>
           <tbody>
             {shown.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <tr
+                key={c.id}
+                className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors duration-700 ${
+                  cases.changed.has(c.id) ? "bg-amber-50" : ""
+                }`}
+              >
                 <td className="py-2.5 px-4">
                   <Link href={`/cases/${c.id}`} className="font-medium text-blue-700 hover:underline">
                     {c.id}
@@ -189,7 +198,7 @@ export default function CasesPage() {
           </tbody>
         </table>
         {!error && shown.length === 0 && refreshedAt && (
-          <p className="text-slate-500 text-sm p-4">{cases.length === 0 ? "No cases yet." : "No cases match."}</p>
+          <p className="text-slate-500 text-sm p-4">{rows.length === 0 ? "No cases yet." : "No cases match."}</p>
         )}
       </div>
     </main>

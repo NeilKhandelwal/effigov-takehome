@@ -19,7 +19,7 @@ from livekit.agents import (
     inference,
     room_io,
 )
-from livekit.agents.llm import ChatMessage
+from livekit.agents.llm import ChatContext, ChatMessage
 from livekit.plugins import ai_coustics
 
 logger = logging.getLogger("agent")
@@ -30,6 +30,11 @@ BACKEND = os.environ.get("BACKEND_URL", "http://localhost:8000")
 BACKEND_DOWN = "I couldn't reach the case system right now, please try again later."
 ISSUE_TYPES = "missed_pickup, pothole, streetlight, water, animal, other"
 HEADERS = {"X-Source": "voice"}  # audit log attributes these writes to the voice agent
+SUMMARY_PROMPT = (
+    "Summarize this City services call for staff in at most two sentences: what the "
+    "resident wanted, what was done (case created/found, note added), and any "
+    "follow-up needed. Transcript:\n"
+)
 
 
 def digits(phone: str) -> str:
@@ -80,6 +85,40 @@ async def patch_call(call_id: str | None, body: dict) -> None:
 
 async def end_call(call_id: str | None) -> None:
     await patch_call(call_id, {"status": "ended"})
+
+
+def history_text(items) -> str:
+    # the ChatContext also holds tool calls and their outputs; only spoken turns summarize well
+    turns = []
+    for item in items:
+        if isinstance(item, ChatMessage) and item.role in ("user", "assistant"):
+            text = clean_text(item.text_content or "")
+            if text:
+                turns.append(f"{'Caller' if item.role == 'user' else 'Agent'}: {text}")
+    return "\n".join(turns) if len(turns) >= 2 else ""  # one turn is just the greeting
+
+
+async def summarize(session: AgentSession) -> str | None:
+    transcript = history_text(session.history.items)
+    if not transcript:
+        return None
+
+    async def run() -> str:
+        llm = inference.LLM(model="openai/gpt-4.1-mini")
+        chat_ctx = ChatContext.empty()
+        chat_ctx.add_message(role="user", content=SUMMARY_PROMPT + transcript)
+        parts = []
+        async with llm.chat(chat_ctx=chat_ctx) as stream:
+            async for chunk in stream:
+                if chunk.delta and chunk.delta.content:
+                    parts.append(chunk.delta.content)
+        return "".join(parts).strip()
+
+    try:
+        return await asyncio.wait_for(run(), timeout=15) or None
+    except Exception:  # a missing summary must never keep the call from being marked ended
+        logger.warning("summarize failed", exc_info=True)
+        return None
 
 
 class Assistant(Agent):
@@ -256,7 +295,15 @@ async def city_services(ctx: JobContext):
 
     # shutdown callbacks are awaited by the job runner (a session "close" handler isn't),
     # so the call is reliably marked ended even on Ctrl-C
-    ctx.add_shutdown_callback(lambda: end_call(agent.call_id))
+    # the summary runs inside the awaited callback so the process waits for it;
+    # end_call always runs, even when summarize fails
+    async def on_shutdown():
+        summary = await summarize(session)
+        if summary:
+            await patch_call(agent.call_id, {"summary": summary})
+        await end_call(agent.call_id)
+
+    ctx.add_shutdown_callback(on_shutdown)
 
     await ctx.connect()
 

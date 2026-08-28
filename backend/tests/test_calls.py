@@ -7,12 +7,23 @@ def test_call_lifecycle_sets_ended_at(client):
     assert r.status_code == 201
     call = r.json()
     assert call == {"id": "CALL-1", "case_id": None, "status": "active",
-                    "started_at": call["started_at"], "ended_at": None, "room": None}
+                    "started_at": call["started_at"], "ended_at": None, "room": None,
+                    "summary": None}
     assert client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"}).status_code == 201
     ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
     assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
     assert client.get("/calls", params={"status": "active"}).json() == []
     assert [c["id"] for c in client.get("/calls").json()] == ["CALL-1"]
+
+
+def test_patch_summary_is_readable_back(client):
+    """Staff read the post-call summary instead of the whole transcript, so it must survive the write."""
+    client.post("/calls")
+    assert client.get("/calls/CALL-1").json()["summary"] is None
+    r = client.patch("/calls/CALL-1", json={"summary": "Resident reported a pothole; case C-1001 created."})
+    assert r.status_code == 200 and r.json()["summary"] == "Resident reported a pothole; case C-1001 created."
+    assert client.get("/calls/CALL-1").json()["summary"] == "Resident reported a pothole; case C-1001 created."
+    assert client.patch("/calls/CALL-9", json={"summary": "x"}).status_code == 404
 
 
 def test_get_call_includes_transcript_in_order(client):
