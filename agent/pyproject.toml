@@ -20,6 +20,8 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "ruff",
+    # the scenario evals run the real backend in-process over httpx.ASGITransport
+    "fastapi",
 ]
 
 [tool.uv]
@@ -36,6 +38,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# evals call a real LLM and need LIVEKIT_* keys, so a clean-clone `pytest` must skip them
+addopts = "-m 'not eval'"
+markers = ["eval: hits the live LLM; run with `pytest -m eval`"]
 
 [tool.ruff]
 line-length = 88

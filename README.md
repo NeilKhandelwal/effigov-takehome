@@ -23,6 +23,8 @@ One narrow workflow, end to end:
 
 **Real-time.** After every write the backend pushes `{"type": "case"|"call"|"transcript", "id": ...}` on `WS /ws`. The socket carries no payload; clients refetch what they're showing. Refetch is idempotent, so duplicate or out-of-order frames can't corrupt UI state. A 2-second poll stays on as a fallback.
 
+**Evals.** Fifteen hand-labelled calls run through the real agent and the real backend in-process, no audio: 12/15 pass. They check tool selection and arguments — issue-type mapping, spoken phone numbers, create-before-update ordering, refusing a 7-digit number, staying out of scope — plus what actually landed in the DB. `cd agent && uv run pytest -m eval`; the two real failures are written up in [agent/evals/RESULTS.md](agent/evals/RESULTS.md).
+
 **Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Three function tools: `create_case`, `lookup_case`, `add_note`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
 
 ## Run (three terminals)
