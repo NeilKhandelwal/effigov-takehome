@@ -2,8 +2,19 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Case, STATUSES, STATUS_COLOR, Status, getCase, patchCase } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Case,
+  CallWithTranscript,
+  STATUSES,
+  STATUS_COLOR,
+  Status,
+  getCase,
+  getCaseCalls,
+  patchCase,
+  useLiveRefresh,
+} from "@/lib/api";
+import Transcript from "@/components/Transcript";
 
 export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -11,9 +22,10 @@ export default function CaseDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false); // true while the user has unsaved edits
+  const [calls, setCalls] = useState<CallWithTranscript[]>([]);
 
-  useEffect(() => {
-    const load = () =>
+  const load = useCallback(
+    () =>
       getCase(id)
         .then((data) => {
           setCase(data);
@@ -21,11 +33,29 @@ export default function CaseDetailPage() {
           // don't clobber the textarea while the user is editing it
           if (!dirty) setNotes(data.notes);
         })
-        .catch((e: Error) => setError(e.message));
+        .catch((e: Error) => setError(e.message)),
+    [id, dirty],
+  );
+
+  const loadCalls = useCallback(
+    () =>
+      getCaseCalls(id)
+        .then(setCalls)
+        .catch(() => setCalls([])), // backend may predate /cases/{id}/calls
+    [id],
+  );
+
+  const loadAll = useCallback(() => {
     load();
-    const timer = setInterval(load, 2000); // poll so voice-driven changes show up
+    loadCalls();
+  }, [load, loadCalls]);
+
+  useEffect(() => {
+    loadAll();
+    const timer = setInterval(loadAll, 2000); // fallback when the socket is down
     return () => clearInterval(timer);
-  }, [id, dirty]);
+  }, [loadAll]);
+  useLiveRefresh(loadAll);
 
   const update = (body: Partial<Case>) =>
     patchCase(id, body)
@@ -101,6 +131,30 @@ export default function CaseDetailPage() {
           >
             Save notes
           </button>
+          <section className="mt-8">
+            <h2 className="text-sm font-semibold text-gray-700 mb-2">Calls</h2>
+            {calls.length === 0 && <p className="text-gray-500 text-sm">No calls linked.</p>}
+            {calls.map((call) => (
+              <div key={call.id} className="mb-4">
+                <div className="flex items-center gap-2 text-sm mb-1">
+                  <Link href={`/calls/${call.id}`} className="text-blue-700 underline">
+                    {call.id}
+                  </Link>
+                  {call.status === "active" ? (
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">
+                      LIVE
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">ended</span>
+                  )}
+                  <span className="text-gray-500">
+                    {new Date(call.started_at).toLocaleString()}
+                  </span>
+                </div>
+                <Transcript lines={call.transcript} />
+              </div>
+            ))}
+          </section>
         </>
       )}
     </main>
