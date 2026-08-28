@@ -52,7 +52,14 @@ export default function CallsPage() {
                   </Link>
                 </td>
                 <td className="py-2.5 px-4">
-                  {c.status === "active" ? (
+                  {c.status === "needs_person" ? (
+                    <span
+                      title={c.transfer_reason ?? undefined}
+                      className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+                    >
+                      Needs a person
+                    </span>
+                  ) : c.status === "active" ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-700 ring-1 ring-red-200">
                       <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> Live
                     </span>

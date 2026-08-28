@@ -6,6 +6,7 @@ import textwrap
 
 import httpx
 from dotenv import load_dotenv
+from livekit import api
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -16,6 +17,7 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     function_tool,
+    get_job_context,
     inference,
     room_io,
 )
@@ -164,6 +166,11 @@ class Assistant(Agent):
                 spell out numbers. Never invent a case status or ID; only repeat what a tool
                 returned. If a tool says the system is unreachable, tell the caller that. If asked why
                 you need something, say you need it to file or find the case; don't cite policies.
+                If the caller asks for a human, is upset, or wants something none of your tools
+                cover, call transfer_to_staff with a short reason, then tell them someone is
+                picking up and keep the line open. When the caller says they have nothing else,
+                say a short goodbye such as "Have a great day" and then call end_call. Never
+                call end_call after transfer_to_staff.
                 """
             ),
         )
@@ -292,6 +299,36 @@ class Assistant(Agent):
         except Exception:
             logger.exception("add_note failed")
             return BACKEND_DOWN
+
+    @function_tool
+    async def transfer_to_staff(self, context: RunContext, reason: str) -> str:
+        """Hand the call to a human staff member. Call it when the caller asks for a person,
+        is upset, or wants something the other tools don't cover.
+
+        Args:
+            reason: one short phrase saying why, shown to staff on the dashboard
+        """
+        # marks the call needs_person; it stays live (no ended_at) so staff see it waiting
+        await patch_call(self.call_id, {"status": "needs_person", "transfer_reason": reason})
+        return ("Transfer requested. Tell the caller a staff member will pick up shortly and to "
+                "stay on the line. Do not end the call.")
+
+    @function_tool
+    async def end_call(self, context: RunContext) -> str:
+        """End the call. Call this only after you have said goodbye and the caller has nothing
+        else."""
+        await context.wait_for_playout()  # the goodbye is still playing; let the caller hear it
+        await asyncio.sleep(2.5)
+        # deleting the room disconnects the browser, which triggers the existing shutdown
+        # callback (summary + status=ended) -- do NOT call end_call()/patch_call here or the
+        # call would be marked ended twice
+        try:
+            job = get_job_context()
+            await job.api.room.delete_room(api.DeleteRoomRequest(room=job.room.name))
+        except Exception:  # never raise: the agent must say the failure, not crash
+            logger.exception("end_call failed")
+            return "I couldn't hang up; ask the caller to hang up on their end."
+        return "Call ended."
 
 
 server = AgentServer()

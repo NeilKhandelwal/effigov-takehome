@@ -37,10 +37,13 @@ export default function CasesPage() {
         setRefreshedAt(new Date().toLocaleTimeString());
       })
       .catch((e: Error) => setError(e.message));
-    // Active calls need their transcript for the "last line" preview; /calls has none.
-    listCalls("active")
-      .then((calls) => Promise.all(calls.map((c) => getCall(c.id))))
-      .then(setLive)
+    // Live calls need their transcript for the "last line" preview; /calls has none.
+    // needs_person calls are still on the line, so they belong here — and go first.
+    listCalls()
+      .then((calls) => Promise.all(calls.filter((c) => c.status !== "ended").map((c) => getCall(c.id))))
+      .then((calls) =>
+        setLive(calls.sort((a, b) => Number(b.status === "needs_person") - Number(a.status === "needs_person"))),
+      )
       .catch(() => setLive([]));
   }, []);
 
@@ -110,6 +113,11 @@ export default function CasesPage() {
                   href={`/calls/${c.id}`}
                   className="block rounded-lg border border-red-200 bg-white p-3 shadow-sm hover:border-red-400"
                 >
+                  {c.status === "needs_person" && (
+                    <div className="-m-3 mb-2 rounded-t-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-800 ring-1 ring-amber-200">
+                      Needs a person{c.transfer_reason ? ` · ${c.transfer_reason}` : ""}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 text-sm mb-1">
                     <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
                     <span className="font-medium">{c.id}</span>

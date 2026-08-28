@@ -8,7 +8,7 @@ def test_call_lifecycle_sets_ended_at(client):
     call = r.json()
     assert call == {"id": "CALL-1", "case_id": None, "status": "active",
                     "started_at": call["started_at"], "ended_at": None, "room": None,
-                    "summary": None}
+                    "summary": None, "transfer_reason": None}
     assert client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"}).status_code == 201
     ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
     assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
@@ -90,3 +90,69 @@ def test_token_returns_room_scoped_credentials(client, monkeypatch):
     body = client.get("/token", params={"identity": "browser"}).json()
     assert body["url"] == "wss://example.livekit.cloud"
     assert body["room"].startswith("call-") and body["token"].count(".") == 2
+
+
+def test_needs_person_is_a_live_status_not_an_ended_one(client):
+    """A transferred call is still on the line: an ended_at here would drop it from 'Live calls'
+    and staff would never see the caller waiting."""
+    client.post("/calls")
+    r = client.patch("/calls/CALL-1", json={"status": "needs_person",
+                                           "transfer_reason": "caller asked for a person"})
+    assert r.status_code == 200
+    call = r.json()
+    assert call["status"] == "needs_person" and call["ended_at"] is None
+    assert call["transfer_reason"] == "caller asked for a person"
+    assert [c["id"] for c in client.get("/calls", params={"status": "needs_person"}).json()] == ["CALL-1"]
+    assert client.get("/calls", params={"status": "active"}).json() == []
+
+
+def test_transfer_reason_survives_pickup_and_hangup(client):
+    """Staff pick up (back to active) and later hang up; the reason is the record of why
+    the agent handed off, so it must outlive both writes."""
+    client.post("/calls")
+    client.patch("/calls/CALL-1", json={"status": "needs_person", "transfer_reason": "upset caller"})
+    picked_up = client.patch("/calls/CALL-1", json={"status": "active"}).json()
+    assert picked_up["status"] == "active" and picked_up["ended_at"] is None
+    ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
+    assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
+    assert ended["transfer_reason"] == "upset caller"
+
+
+def test_patch_cannot_reopen_an_ended_call(client):
+    """An ended call is the record of what happened; reopening it would resurrect a dead call in
+    'Live calls' and leave a stale ended_at, so the write is refused instead of half-applied."""
+    client.post("/calls")
+    ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
+    r = client.patch("/calls/CALL-1", json={"status": "active"})
+    assert r.status_code == 409 and r.json()["detail"] == "call already ended"
+    assert client.patch("/calls/CALL-1", json={"status": "needs_person"}).status_code == 409
+    after = client.get("/calls/CALL-1").json()
+    assert after["status"] == "ended" and after["ended_at"] == ended["ended_at"]
+
+
+def test_init_db_adds_missing_columns_to_a_legacy_calls_table(tmp_path, monkeypatch):
+    """Deployed DBs predate room/summary/transfer_reason; the migration has to add them without
+    swallowing real errors, and has to be safe to run on every boot."""
+    import os
+    import sqlite3
+
+    from app import db
+
+    path = str(tmp_path / "legacy.db")
+    monkeypatch.setenv("CASES_DB", path)
+    monkeypatch.setattr(db, "DB_PATH", os.environ["CASES_DB"])
+    with sqlite3.connect(path) as conn:
+        conn.execute("""CREATE TABLE calls (
+            rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            started_at TEXT NOT NULL,
+            ended_at TEXT
+        )""")
+
+    db.init_db()
+    with sqlite3.connect(path) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(calls)")}
+    assert {"room", "summary", "transfer_reason"} <= cols
+
+    db.init_db()  # every boot runs it: the second pass must be a no-op, not a duplicate-column error

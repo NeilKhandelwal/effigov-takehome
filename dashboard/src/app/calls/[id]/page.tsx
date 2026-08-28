@@ -47,7 +47,9 @@ export default function CallPage() {
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
 
-  const active = call?.status === "active";
+  // needs_person is still a call in progress: the line is open, staff just haven't taken it yet
+  const live = !!call && call.status !== "ended";
+  const needsPerson = call?.status === "needs_person";
   const cs = c.data;
 
   return (
@@ -58,13 +60,20 @@ export default function CallPage() {
       <div className="flex items-center gap-3 mt-2 mb-4">
         <h1 className="text-xl font-semibold">Call {id}</h1>
         {call && (
-          active ? (
+          needsPerson ? (
+            <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-800 ring-1 ring-amber-200">
+              Needs a person
+            </span>
+          ) : live ? (
             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-700 ring-1 ring-red-200">
               <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
             </span>
           ) : (
             <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 ring-1 ring-slate-200">Ended</span>
           )
+        )}
+        {needsPerson && call?.transfer_reason && (
+          <span className="text-sm text-amber-800">{call.transfer_reason}</span>
         )}
         {call && (
           <span className="text-sm text-slate-500">
@@ -83,7 +92,7 @@ export default function CallPage() {
                 {call.summary}
               </p>
             )}
-            <Transcript lines={call.transcript} className="max-h-[70vh] min-h-64" active={active} />
+            <Transcript lines={call.transcript} className="max-h-[70vh] min-h-64" active={live} />
           </section>
 
           <aside className="rounded-lg border border-slate-200 bg-white shadow-sm p-4 text-sm h-fit">

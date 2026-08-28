@@ -78,8 +78,9 @@ export default function CaseDetailPage() {
   const val = (e: CaseEvent, v: string | null) =>
     !v ? "—" : e.field === "status" || e.field === "issue_type" ? humanize(v) : v;
   const cs = c.data;
-  const liveCall = calls.find((k) => k.status === "active");
-  const ended = calls.filter((k) => k.status !== "active");
+  // a call waiting on staff (needs_person) is still in progress, so it reads as the live one
+  const liveCall = calls.find((k) => k.status !== "ended");
+  const ended = calls.filter((k) => k.status === "ended");
   const card = "rounded-lg border border-slate-200 bg-white shadow-sm p-4";
   const h2 = "text-xs uppercase tracking-wide text-slate-500 mb-3";
 
