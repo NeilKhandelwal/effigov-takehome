@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS cases (
 );
 CREATE TABLE IF NOT EXISTS calls (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-    case_id TEXT,
+    case_id TEXT,  -- the case the agent is working right now; every link lives in call_cases
     status TEXT NOT NULL DEFAULT 'active',
     started_at TEXT NOT NULL,
     ended_at TEXT,
@@ -27,6 +27,16 @@ CREATE TABLE IF NOT EXISTS calls (
     summary TEXT,
     transfer_reason TEXT
 );
+-- a call can create or look up several cases; this is the truth about which,
+-- while calls.case_id is only the cursor (the case the agent is working right now)
+CREATE TABLE IF NOT EXISTS call_cases (
+    call_id TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    how TEXT NOT NULL,  -- 'created' | 'looked_up'
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY (call_id, case_id)
+);
+CREATE INDEX IF NOT EXISTS call_cases_case ON call_cases (case_id);
 CREATE TABLE IF NOT EXISTS transcript (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     call_id TEXT NOT NULL,
@@ -66,6 +76,11 @@ def init_db() -> None:
         add_column(conn, "calls", "summary", "TEXT")
         add_column(conn, "calls", "transfer_reason", "TEXT")
         add_column(conn, "cases", "lookup_code", "TEXT")
+        # DBs written before call_cases existed hold their one link in calls.case_id only
+        conn.execute(
+            "INSERT OR IGNORE INTO call_cases (call_id, case_id, how, linked_at) "
+            "SELECT 'CALL-' || rowid, case_id, 'created', started_at FROM calls WHERE case_id IS NOT NULL"
+        )
 
 
 def case_id(rowid: int) -> str:

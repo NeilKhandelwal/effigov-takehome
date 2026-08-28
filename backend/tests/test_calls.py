@@ -6,7 +6,7 @@ def test_call_lifecycle_sets_ended_at(client):
     r = client.post("/calls", json={})
     assert r.status_code == 201
     call = r.json()
-    assert call == {"id": "CALL-1", "case_id": None, "status": "active",
+    assert call == {"id": "CALL-1", "case_id": None, "case_ids": [], "status": "active",
                     "started_at": call["started_at"], "ended_at": None, "room": None,
                     "summary": None, "transfer_reason": None}
     assert client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"}).status_code == 201
