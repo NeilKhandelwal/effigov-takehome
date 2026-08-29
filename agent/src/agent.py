@@ -57,10 +57,16 @@ def normalize_code(spoken: str) -> str:
     return "-".join(words)
 
 
-def can_open_case(current: str | None, classified: bool) -> bool:
+def is_filed(classified: bool, described: bool) -> bool:
+    # a case is "filed" once it has an issue type and a description (that's when its lookup
+    # code is read back); from then on it is read-only for update_case
+    return classified and described
+
+
+def can_open_case(current: str | None, classified: bool, described: bool) -> bool:
     # one problem per case, but a caller may raise two: allow a second case only once the
-    # first is classified, so the agent can't leave a half-filled case behind
-    return current is None or classified
+    # first is filed, so the agent can't leave a half-filled case behind
+    return current is None or is_filed(classified, described)
 
 
 def clean_text(text: str) -> str:
@@ -187,8 +193,9 @@ class Assistant(Agent):
                 comma between them so they land one at a time, and offer once to repeat them.
                 Never say the lookup code before the description has been saved. One problem
                 per case: if the caller raises a second, separate problem, finish the first
-                (issue type and description), then call create_case again. Each case has its
-                own ID and its own lookup code, read back after that case's description.
+                (issue type and description), then call create_case again — never update_case;
+                a filed case is not changed. Each case has its own ID and its own lookup code,
+                read back after that case's description.
 
                 If the caller asks about an existing case, ask for their lookup code (three
                 words) and call lookup_case. Do not look up cases by phone number or case ID.
@@ -216,7 +223,8 @@ class Assistant(Agent):
         # repeat the ID) and every case this call touched, in order
         self.current_case: str | None = None
         self.cases: list[str] = []
-        self.current_classified = False  # current_case has an issue_type; gates a second case
+        self.current_classified = False  # current_case has an issue_type
+        self.current_described = False  # current_case has a description; both gate a second case
         self.lookup_code: str | None = None  # current_case's code, spoken once its description saves
         self.link_how = "created"
         self.call_linked = False  # current_case is linked to the call record; retried until it is
@@ -236,9 +244,9 @@ class Assistant(Agent):
             name: caller's full name
             phone: caller's phone number
         """
-        if not can_open_case(self.current_case, self.current_classified):
+        if not can_open_case(self.current_case, self.current_classified, self.current_described):
             await self._link_call()
-            return "Finish describing the current issue first (issue type), then open another case."
+            return "Finish the current case first (issue type and description), then open another."
         if not valid_phone(phone):
             n = len(digits(phone))
             return f"That number has {n} digits; a phone number should have ten. Could you say it again?"
@@ -256,7 +264,7 @@ class Assistant(Agent):
             return BACKEND_DOWN
         self.current_case = case_id
         self.cases.append(case_id)
-        self.current_classified = False
+        self.current_classified = self.current_described = False
         self.link_how, self.call_linked = "created", False
         await self._link_call()
         return f"Started case {case_id}"
@@ -277,6 +285,14 @@ class Assistant(Agent):
         """
         if not self.current_case:
             return "No case is open yet; call create_case with the name and phone first."
+        if is_filed(self.current_classified, self.current_described):
+            # a filed case is never rewritten: "my trash wasn't collected" after a pothole was
+            # filed is a NEW case, not a correction to the old one
+            return (
+                f"Case {self.current_case} is already filed and can't be changed. If this is a "
+                "different problem, call create_case to open a new case. If it's a correction "
+                "to the same problem, call add_note."
+            )
         body = {}
         if issue_type is not None:
             if issue_type not in ISSUE_TYPES.split(", "):
@@ -294,7 +310,9 @@ class Assistant(Agent):
             logger.exception("update_case failed")
             return BACKEND_DOWN
         if "issue_type" in body:
-            self.current_classified = True  # the case is classified; a second one may be opened
+            self.current_classified = True
+        if "description" in body:
+            self.current_described = True  # classified + described = filed; a second case may open
         await self._link_call()
         if description is not None and self.lookup_code:
             # withheld until now so the agent can't read it out before the case is filled in
@@ -325,7 +343,9 @@ class Assistant(Agent):
             return BACKEND_DOWN
         # work the case it found from here on: add_note writes to it, and an existing case is
         # not one the agent is still filling in, so it never blocks a new case
-        self.current_case, self.link_how, self.current_classified = c["id"], "looked_up", True
+        # an existing case counts as filed: update_case must never rewrite it
+        self.current_case, self.link_how = c["id"], "looked_up"
+        self.current_classified = self.current_described = True
         self.lookup_code = None  # not ours to read out: the caller already has this one's code
         self.call_linked = False
         if c["id"] not in self.cases:
