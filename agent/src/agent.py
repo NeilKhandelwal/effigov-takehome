@@ -342,17 +342,17 @@ class Assistant(Agent):
         Args:
             note: the note to add
         """
-        if not self.case_id:
+        if not self.current_case:
             return "No case on this call yet; ask for the three-word lookup code and call lookup_case."
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
-                r = await client.get(f"{BACKEND}/cases/{self.case_id}")
+                r = await client.get(f"{BACKEND}/cases/{self.current_case}")
                 r.raise_for_status()
                 # PATCH notes replaces the field, so append client-side (per CONTRACT.md)
                 notes = (r.json()["notes"] + "\n" + note).strip()
-                r = await client.patch(f"{BACKEND}/cases/{self.case_id}", json={"notes": notes})
+                r = await client.patch(f"{BACKEND}/cases/{self.current_case}", json={"notes": notes})
                 r.raise_for_status()
-                return f"Note added to case {self.case_id}"
+                return f"Note added to case {self.current_case}"
         except Exception:
             logger.exception("add_note failed")
             return BACKEND_DOWN
