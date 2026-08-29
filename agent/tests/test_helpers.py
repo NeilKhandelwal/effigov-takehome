@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from agent import can_open_case, clean_text, digits, normalize_code, valid_phone
+from agent import can_open_case, clean_text, digits, is_filed, normalize_code, valid_phone
 
 
 def test_clean_text_strips_expressive_tags():
@@ -41,11 +41,19 @@ def test_normalize_code_accepts_spoken_forms():
 
 def test_can_open_case_allows_the_first_case():
     """Nothing to finish yet, so the first create_case of a call is always allowed."""
-    assert can_open_case(None, False)
+    assert can_open_case(None, False, False)
 
 
-def test_can_open_case_blocks_a_second_case_until_the_first_is_classified():
+def test_can_open_case_blocks_a_second_case_until_the_first_is_filed():
     """The LLM re-calls create_case when a caller keeps talking; a second case opened before the
-    first has an issue type leaves staff with an empty case nobody can triage."""
-    assert not can_open_case("C-1001", False)
-    assert can_open_case("C-1001", True)
+    first has an issue type AND a description leaves staff with a half-filled case."""
+    assert not can_open_case("C-1001", False, False)
+    assert not can_open_case("C-1001", True, False)
+    assert can_open_case("C-1001", True, True)
+
+
+def test_is_filed_makes_a_finished_case_read_only():
+    """Seen live: "my trash wasn't collected" after a pothole was filed was written onto the
+    pothole case via update_case. Once filed, a case must only ever be appended to, never rewritten."""
+    assert not is_filed(True, False)
+    assert is_filed(True, True)
