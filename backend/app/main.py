@@ -6,13 +6,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from livekit import api
 
 from app import codes, db
-from app.models import (Call, CallCreate, CallDetail, CallStatus, CallUpdate, Case, CaseCreate,
-                        CaseCreated, CaseEvent, CaseUpdate, TranscriptCreate, TranscriptLine)
+from app.models import (Call, CallCaseLink, CallCreate, CallDetail, CallStatus, CallUpdate, Case,
+                        CaseCreate, CaseCreated, CaseEvent, CaseUpdate, TranscriptCreate,
+                        TranscriptLine)
 
 load_dotenv(".env")  # LIVEKIT_* for /token; python-dotenv ships with uvicorn[standard]
 
@@ -74,11 +75,33 @@ def fetch_case(conn, rowid: int | None) -> Case:
     return Case(**db.row_to_case(row))
 
 
+def to_call(conn, row) -> Call:
+    d = db.row_to_call(row)
+    # insertion order is link order; linked_at is only second-resolution
+    ids = conn.execute("SELECT case_id FROM call_cases WHERE call_id = ? ORDER BY rowid", (d["id"],))
+    return Call(**d, case_ids=[r["case_id"] for r in ids])
+
+
 def fetch_call(conn, rowid: int | None) -> Call:
     row = conn.execute("SELECT * FROM calls WHERE rowid = ?", (rowid,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="call not found")
-    return Call(**db.row_to_call(row))
+    return to_call(conn, row)
+
+
+def link_case(conn, call_id: str, case_id: str, how: str, source: str) -> bool:
+    """Record that this call touched this case. Returns True if the link is new.
+
+    The join table is the truth; calls.case_id is only the cursor. One call_linked event
+    per (case, call), so a re-link or a re-sent PATCH doesn't spam the audit log.
+    """
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO call_cases (call_id, case_id, how, linked_at) VALUES (?, ?, ?, ?)",
+        (call_id, case_id, how, now()),
+    )
+    if cur.rowcount:
+        log_event(conn, case_id, "call_linked", None, call_id, source)
+    return bool(cur.rowcount)
 
 
 def with_transcript(conn, call: Call) -> CallDetail:
@@ -204,8 +227,13 @@ def list_case_events(case_id: str) -> list[CaseEvent]:
 def list_case_calls(case_id: str) -> list[CallDetail]:
     with db.connect() as conn:
         case = fetch_case(conn, db.rowid_of(case_id))
-        rows = conn.execute("SELECT * FROM calls WHERE case_id = ? ORDER BY rowid", (case.id,)).fetchall()
-        return [with_transcript(conn, Call(**db.row_to_call(r))) for r in rows]
+        # call_cases holds the public "CALL-n" id, so join on the rendered id
+        rows = conn.execute(
+            "SELECT calls.* FROM calls JOIN call_cases ON call_cases.call_id = 'CALL-' || calls.rowid "
+            "WHERE call_cases.case_id = ? ORDER BY calls.rowid",
+            (case.id,),
+        ).fetchall()
+        return [with_transcript(conn, to_call(conn, r)) for r in rows]
 
 
 @app.post("/calls", status_code=201)
@@ -225,7 +253,8 @@ def list_calls(status: CallStatus | None = None, room: str | None = None) -> lis
         sql += " WHERE " + " AND ".join(f"{k} = ?" for k in filters)
     sql += " ORDER BY rowid DESC"
     with db.connect() as conn:
-        return [Call(**db.row_to_call(r)) for r in conn.execute(sql, tuple(filters.values()))]
+        rows = conn.execute(sql, tuple(filters.values())).fetchall()
+        return [to_call(conn, r) for r in rows]
 
 
 @app.get("/calls/{call_id}")
@@ -244,12 +273,31 @@ async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("st
             raise HTTPException(status_code=409, detail="call already ended")
         if "case_id" in changes:
             case = fetch_case(conn, db.rowid_of(changes["case_id"]))  # 404 "case not found"
-            log_event(conn, case.id, "call_linked", None, call.id, x_source)
+            # the old agent path: moving the cursor is also a link
+            link_case(conn, call.id, case.id, "looked_up", x_source)
         if changes.get("status") == "ended":
             changes["ended_at"] = now()
         if changes:
             sets = ", ".join(f"{k} = ?" for k in changes)
             conn.execute(f"UPDATE calls SET {sets} WHERE rowid = ?", (*changes.values(), rowid))
+        call = fetch_call(conn, rowid)
+    await broadcast("call", call.id)
+    return call
+
+
+@app.post("/calls/{call_id}/cases")
+async def add_call_case(call_id: str, body: CallCaseLink, response: Response,
+                        x_source: str = Header("staff")) -> Call:
+    """Link a case to a call, and make it the one the agent is working (calls.case_id).
+
+    201 when the link is new, 200 when the call was already linked to that case.
+    """
+    rowid = db.call_rowid_of(call_id)
+    with db.connect() as conn:
+        call = fetch_call(conn, rowid)  # 404 before touching anything
+        case = fetch_case(conn, db.rowid_of(body.case_id))
+        response.status_code = 201 if link_case(conn, call.id, case.id, body.how, x_source) else 200
+        conn.execute("UPDATE calls SET case_id = ? WHERE rowid = ?", (case.id, rowid))
         call = fetch_call(conn, rowid)
     await broadcast("call", call.id)
     return call

@@ -8,7 +8,7 @@ from scripts.seed import SAMPLES, seed
 if __name__ == "__main__":
     db.init_db()
     with db.connect() as conn:
-        for table in ("transcript", "calls", "case_events", "cases"):
+        for table in ("transcript", "call_cases", "calls", "case_events", "cases"):
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM sqlite_sequence")  # restart AUTOINCREMENT so ids are C-1001.. again
     seed()

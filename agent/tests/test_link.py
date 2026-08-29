@@ -1,4 +1,4 @@
-"""create_case links the live call to its case; if that PATCH fails, the link is retried later."""
+"""create_case links the live call to its case; if that link fails, it is retried later."""
 import sys
 from pathlib import Path
 
@@ -45,23 +45,23 @@ async def test_failed_call_link_is_retried_on_next_tool_call(monkeypatch):
     outcomes = [False, True]  # first link attempt fails, second succeeds
     linked_with = []
 
-    async def fake_patch_call(call_id, body):
-        linked_with.append((call_id, body))
+    async def fake_link(call_id, case_id, how):
+        linked_with.append((call_id, case_id, how))
         return outcomes.pop(0)
 
     a = Assistant()  # before patching httpx: the LLM client is built here and needs the real one
     a.call_id = "CALL-7"
     monkeypatch.setattr(mod.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(mod, "patch_call", fake_patch_call)
+    monkeypatch.setattr(mod, "link_call_case", fake_link)
 
     assert await a.create_case(None, "Ana Ruiz", "555 010 2020") == "Started case C-1001"
-    assert a.case_id == "C-1001" and a.call_linked is False
+    assert a.current_case == "C-1001" and a.call_linked is False
 
     assert await a.update_case(None, issue_type="pothole") == "Updated case C-1001"
     assert a.call_linked is True
-    assert linked_with == [("CALL-7", {"case_id": "C-1001"})] * 2
+    assert linked_with == [("CALL-7", "C-1001", "created")] * 2
 
-    # once linked, further tool calls don't PATCH again
+    # once linked, further tool calls don't POST again
     await a.update_case(None, description="on Main St")
     assert len(linked_with) == 2
 

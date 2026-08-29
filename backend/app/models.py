@@ -6,6 +6,7 @@ IssueType = Literal["missed_pickup", "pothole", "streetlight", "water", "animal"
 Status = Literal["open", "in_progress", "resolved"]
 CallStatus = Literal["active", "needs_person", "ended"]
 Role = Literal["user", "agent"]
+LinkHow = Literal["created", "looked_up"]
 
 
 class CaseCreate(BaseModel):
@@ -50,9 +51,15 @@ class CallUpdate(BaseModel):
     transfer_reason: str | None = None
 
 
+class CallCaseLink(BaseModel):
+    case_id: str
+    how: LinkHow = "created"
+
+
 class Call(BaseModel):
     id: str
-    case_id: str | None
+    case_id: str | None  # the case being worked right now; case_ids is every case this call touched
+    case_ids: list[str] = []
     status: CallStatus
     started_at: str
     ended_at: str | None

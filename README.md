@@ -6,7 +6,7 @@ A resident calls the City services line, a LiveKit voice agent files a service r
 
 One narrow workflow, end to end:
 
-1. Caller says "I want to report a pothole." The agent collects name and phone (confirmed by reading the digits back; partial numbers are refused) and opens the case right then. As it learns the issue type and a one-sentence description it fills them in with `update_case` — staff watch the fields change mid-call — and only then reads the case ID back, followed by a three-word lookup code the caller will need to call back about it.
+1. Caller says "I want to report a pothole." The agent collects name and phone (confirmed by reading the digits back; partial numbers are refused) and opens the case right then. As it learns the issue type and a one-sentence description it fills them in with `update_case` — staff watch the fields change mid-call — and only then reads the case ID back, followed by a three-word lookup code the caller will need to call back about it. A second, unrelated problem raised on the same call opens its own case once the first is described — one call, several cases, each with its own ID and code.
 2. The dashboard shows the call the moment it starts, streams the transcript line by line, and shows the new case at the top of the list — no refresh.
 3. Staff open the case, change its status, and see an audit trail of every change and who made it (`staff` vs `voice`).
 4. The caller rings back and says their three words — "blue, river, maple" — and only then does `lookup_case` read the current status back. The phone number is discovery; the code is authentication, so knowing a number or a case ID gets you nothing.
@@ -16,16 +16,16 @@ One narrow workflow, end to end:
             │  httpx: POST /cases, /calls, /calls/{id}/transcript          ▲  fetch + WS /ws
             ▼                                                    │
          backend/  (FastAPI + stdlib sqlite3)  ──── broadcast {type,id} ────┘
-         tables: cases · calls · transcript · case_events
+         tables: cases · calls · call_cases · transcript · case_events
 ```
 
-**Data model.** A *call* is not a *case*: one case can have many calls (the report, then the follow-up), and a lookup-only call shouldn't create a junk case. Transcript lines hang off the call; the call links to a case once the agent creates or finds one. Every case *change* appends a `case_events` row (a PATCH that re-sends the same value writes nothing).
+**Data model.** A *call* is not a *case*: one case can have many calls (the report, then the follow-up), and a lookup-only call shouldn't create a junk case. Transcript lines hang off the call; the call links to a case once the agent creates or finds one. A call can open or find several cases (a caller reports a pothole *and* a missed pickup): `calls.case_id` is just the cursor — the case the agent is working right now — and the `call_cases` join table is the truth about every case the call touched. Every case *change* appends a `case_events` row (a PATCH that re-sends the same value writes nothing).
 
 **Real-time.** After every write the backend pushes `{"type": "case"|"call"|"transcript", "id": ...}` on `WS /ws`. The socket carries no payload; clients refetch what they're showing. Refetch is idempotent, so duplicate or out-of-order frames can't corrupt UI state. A 2-second poll stays on as a fallback.
 
 **Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, for reliable tool calls with a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no other provider accounts. Six function tools: `create_case`, `update_case`, `lookup_case`, `add_note`, `transfer_to_staff` (flags the call `needs_person` and keeps the line open for staff), `end_call`. Every tool swallows backend errors and says so to the caller instead of crashing the call; if the backend is down at call start, the call still works, just without the dashboard.
 
-**Does the agent actually work?** `agent/tests/test_scenarios.py` runs 19 hand-labelled scenarios through the real agent and backend and checks which tools it called with what — and, where it matters, what the caller would hear and what landed in the DB. Three runs, all recorded in [agent/evals/RESULTS.md](agent/evals/RESULTS.md): **12/15** on the first prompt, **14/15** after fixing the two misses it found, **19/19** after adding scenarios for warm transfer, `end_call`, and null-until-classified. Single runs, not re-rolled. `cd agent && uv run pytest -m eval` (LLM calls; deselected by default).
+**Does the agent actually work?** `agent/tests/test_scenarios.py` runs 21 hand-labelled scenarios through the real agent and backend and checks which tools it called with what — and, where it matters, what the caller would hear and what landed in the DB. Three runs, all recorded in [agent/evals/RESULTS.md](agent/evals/RESULTS.md): **12/15** on the first prompt, **14/15** after fixing the two misses it found, **19/19** after adding scenarios for warm transfer, `end_call`, and null-until-classified. Single runs, not re-rolled; the two multi-case scenarios added afterwards have not been run yet. `cd agent && uv run pytest -m eval` (LLM calls; deselected by default).
 
 ## Run (three terminals — each block starts at the repo root)
 
@@ -42,7 +42,7 @@ cd agent && cp .env.example .env      # LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_
 uv sync && uv run python src/agent.py download-files   # once: turn-detector / VAD models
 uv run python src/agent.py dev
 ```
-Tests: `cd backend && uv run pytest` (27) and `cd agent && uv run pytest` (9; the LLM evals are deselected by default).
+Tests: `cd backend && uv run pytest` (32) and `cd agent && uv run pytest` (11; the LLM evals are deselected by default).
 
 Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
 
@@ -63,7 +63,8 @@ Built in the 3-hour window with Claude Code as pair: I set the API contract, dat
 | `GET` | `/cases/{id}/events` | audit log, oldest first |
 | `GET` | `/cases/{id}/calls` | that case's calls with transcripts |
 | `POST` / `GET` | `/calls[?status=&room=]` | a call record per voice session |
-| `GET` / `PATCH` | `/calls/{id}` | PATCH `status` (`active` \| `needs_person` \| `ended`), `case_id`, `summary`, `transfer_reason` |
+| `GET` / `PATCH` | `/calls/{id}` | PATCH `status` (`active` \| `needs_person` \| `ended`), `case_id`, `summary`, `transfer_reason`; a call reads back `case_id` (the case being worked now) and `case_ids` (every case it touched, in link order) |
+| `POST` | `/calls/{id}/cases` | body `{case_id, how}` (`created` \| `looked_up`); links the case and makes it the current one. 201 new link, 200 already linked, 404 unknown call or case. One `call_linked` event per (case, call) |
 | `POST` | `/calls/{id}/transcript` | `{role: user\|agent, text}` |
 | `GET` | `/token?identity=` | LiveKit join token + a fresh room name for the browser call |
 | `GET` | `/health` | `{"ok": true}`; the dashboard uses it to show "Backend unreachable" |
@@ -88,7 +89,7 @@ The rule was one narrow workflow, working, over surface area. The big ones:
 - Lookup codes are stored in plaintext, so anyone with database or dashboard access can read one. A caller who has lost their code has no self-service path: staff verify them another way and read it out of the DB.
 - Cases filed before the code column existed (the seeded three are regenerated, older rows are not) have `lookup_code = NULL` and cannot be reached by voice at all.
 - The wrong-code counter is a module-level dict keyed by call id: single process, cleared on restart, and a caller who guesses wrong five times can still get in with the right code afterwards. It slows guessing on one call, it is not a real rate limiter.
-- One call → one case: `lookup_case` claims the call the same way `create_case` does, so a caller who looks up an old case and then wants to file a new one has to call back.
+- A second case is refused while the current one has no issue type yet, so a caller who raises two problems must finish describing the first; the agent's read-back of two IDs and two codes is only as reliable as the LLM.
 - `case_events` has no rows for cases created before the table existed (the three seeded ones).
 - `db.connect()` connections are released by CPython refcounting, not closed explicitly. Fine for one process.
 - The home page does one `GET /calls/{id}` per active call on every refresh (N+1). N is 1 during a demo.
@@ -96,7 +97,7 @@ The rule was one narrow workflow, working, over surface area. The big ones:
 - A call whose worker dies mid-call stays `active` forever — there's no heartbeat or timeout; `reset_demo` is the only fix.
 - The nav opens its own WebSocket on every page just to drive the Live/Polling dot, so each page holds two sockets.
 - Notes are a mutable blob beside an append-only event log — two storage models for one history. A note should be a `case_events` row (`field="note"`, with `source` and `ts`).
-- A call re-linked from one case to another keeps only the last link in current state; both `call_linked` events survive in the audit log.
+- `calls.case_id` moves to whichever case the agent is working; the full list lives in `call_cases`, and clients that only read the cursor see the last one.
 - Foreign keys are public-ID strings (`calls.case_id` = `"C-1001"`) and `PRAGMA foreign_keys` is off; integrity is app-enforced by 404-before-write in `main.py`.
 - The issue-type enum is written out in three places (backend `Literal`, agent prompt, dashboard array) — deliberate under "hardcode it twice"; the third copy is the signal to centralise it.
 - `case_events` only covers case writes: a call's status or summary changing leaves no audit row. Timestamps are second-resolution, so event order relies on `ORDER BY id`.

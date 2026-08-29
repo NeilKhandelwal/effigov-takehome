@@ -11,6 +11,7 @@ import {
   Status,
   TrackedList,
   ago,
+  caseIdsOf,
   duration,
   getCall,
   humanize,
@@ -57,7 +58,7 @@ export default function CasesPage() {
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
 
-  const onCall = new Set(live.map((c) => c.case_id).filter(Boolean));
+  const onCall = new Set(live.flatMap(caseIdsOf)); // a call can be working several cases
   const rows = cases.data;
   const count = (s: Status) => rows.filter((c) => c.status === s).length;
   const needle = q.trim().toLowerCase();
@@ -126,7 +127,7 @@ export default function CasesPage() {
                     <span className="font-medium">{c.id}</span>
                     <span className="text-slate-500 font-mono text-xs">{duration(c.started_at, null)}</span>
                     <span className="ml-auto text-xs text-slate-500">
-                      {c.case_id ? `→ ${c.case_id}` : "no case yet"}
+                      {caseIdsOf(c).length ? `→ ${caseIdsOf(c).join(", ")}` : "no case yet"}
                     </span>
                   </div>
                   <p className="text-sm text-slate-700 truncate">
