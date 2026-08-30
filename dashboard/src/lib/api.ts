@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-// Hardcoded on purpose: local demo, one backend, no env plumbing yet.
-export const API = "http://localhost:8000";
+// Backend base URL. Defaults to the local backend; override with NEXT_PUBLIC_API_URL
+// (see dashboard/.env.example). Next inlines NEXT_PUBLIC_* at build time.
+export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type Status = "open" | "in_progress" | "resolved";
 
@@ -43,7 +44,7 @@ export function duration(start: string, end: string | null) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
-export const BACKEND_DOWN = "Backend unreachable at localhost:8000";
+export const BACKEND_DOWN = `Backend unreachable at ${API}`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
