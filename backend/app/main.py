@@ -15,7 +15,7 @@ from app.models import (Call, CallCaseLink, CallCreate, CallDetail, CallStatus, 
                         CaseCreate, CaseCreated, CaseEvent, CaseUpdate, TranscriptCreate,
                         TranscriptLine)
 
-load_dotenv(".env")  # LIVEKIT_* for /token; python-dotenv ships with uvicorn[standard]
+load_dotenv(".env")  # LIVEKIT_* for /token, CORS_ORIGINS; python-dotenv ships with uvicorn[standard]
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -23,10 +23,17 @@ async def lifespan(_app):
     yield
 
 
+def cors_origins() -> list[str]:
+    """Allowed browser origins, comma-separated in CORS_ORIGINS. Origins are exact:
+    http://127.0.0.1:3000 is NOT http://localhost:3000 — list both if you open both."""
+    raw = os.getenv("CORS_ORIGINS") or "http://localhost:3000"  # blank means unset
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app = FastAPI(title="EffiGov cases", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins(),  # read once, at import
     allow_methods=["*"],
     allow_headers=["*"],
 )

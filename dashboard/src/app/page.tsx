@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Case,
   CallWithTranscript,
@@ -50,11 +50,6 @@ export default function CasesPage() {
       .catch(() => setLive([]));
   }, []);
 
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 2000); // fallback when the socket is down
-    return () => clearInterval(timer);
-  }, [load]);
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
 

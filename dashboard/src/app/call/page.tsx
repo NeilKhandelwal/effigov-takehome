@@ -2,7 +2,7 @@
 
 import "@livekit/components-styles";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   BarVisualizer,
   DisconnectButton,
@@ -146,11 +146,6 @@ function LiveTranscript({ room }: { room: string }) {
     [room],
   );
 
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 2000); // fallback when the socket is down
-    return () => clearInterval(timer);
-  }, [load]);
   useLiveRefresh(load);
   useNow(); // duration ticks every second, not only when data arrives
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Case,
   CallWithTranscript,
@@ -44,11 +44,6 @@ export default function CallPage() {
     [id],
   );
 
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 2000); // fallback when the socket is down
-    return () => clearInterval(timer);
-  }, [load]);
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
 
