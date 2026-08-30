@@ -6,9 +6,6 @@ __pycache__/
 *.db
 node_modules/
 .next/
-CLAUDE.md
 .DS_Store
 agent/console.log
 agent/worker.log
-CONTRACT.md
-DECISIONS.md
