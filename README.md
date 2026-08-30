@@ -126,8 +126,6 @@ The backend's SQLite file lives on the named volume `cases-db` at `/data/cases.d
 
 `.github/workflows/evals.yml` runs the LLM scenario evals (`pytest -m eval`) on a nightly cron and on manual dispatch. It needs three repository secrets -- **`LIVEKIT_URL`**, **`LIVEKIT_API_KEY`**, **`LIVEKIT_API_SECRET`** -- and skips with a notice if they are not set.
 
-## API (FastAPI, `backend/app/main.py`)
-
 ## Testing
 
 Two kinds, and only one of them costs money.
