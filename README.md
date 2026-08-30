@@ -108,6 +108,26 @@ your mic with no browser.
 Reset to a clean state at any time: `cd backend && uv run python -m scripts.reset_demo` — wipes all
 tables and reseeds the 3 sample cases, printing each case's lookup code.
 
+### Run with docker
+
+Local dev only (the three-terminal path above is still the primary one). Needs Docker Desktop / Engine with the Compose plugin.
+
+```sh
+docker compose up --build            # backend :8000 (seeded on first start) + dashboard :3000
+docker compose --profile voice up    # ...plus the LiveKit agent worker (needs agent/.env)
+docker compose down                  # stop; add -v to also drop the seeded DB volume
+```
+
+The backend's SQLite file lives on the named volume `cases-db` at `/data/cases.db`, seeded with the 3 sample cases the first time the volume is empty; restarts leave it alone, `down -v` resets it. The dashboard runs `next dev` with `dashboard/` bind-mounted, so edits hot-reload. The agent service reads `agent/.env` (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) and talks to the backend over the compose network.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR: backend pytest, agent pytest (unit tests only -- the `eval` marker stays deselected and no LiveKit keys are needed), and dashboard `npm run lint` + `npm run build`, in parallel.
+
+`.github/workflows/evals.yml` runs the LLM scenario evals (`pytest -m eval`) on a nightly cron and on manual dispatch. It needs three repository secrets -- **`LIVEKIT_URL`**, **`LIVEKIT_API_KEY`**, **`LIVEKIT_API_SECRET`** -- and skips with a notice if they are not set.
+
+## API (FastAPI, `backend/app/main.py`)
+
 ## Testing
 
 Two kinds, and only one of them costs money.

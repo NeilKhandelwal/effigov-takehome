@@ -1,0 +1,64 @@
+# Agent LLM evals -- the 21 hand-labelled scenarios in agent/tests/test_scenarios.py.
+# These call a live LLM through LiveKit Inference, so they are never part of CI.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   LIVEKIT_URL         wss://<project>.livekit.cloud
+#   LIVEKIT_API_KEY
+#   LIVEKIT_API_SECRET
+# Without them the job exits successfully with a message instead of failing.
+name: Agent evals
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 07:00 UTC nightly
+    - cron: "0 7 * * *"
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evals:
+    name: scenario evals
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for LiveKit secrets
+        id: secrets
+        run: |
+          if [ -z "${{ secrets.LIVEKIT_URL }}" ] || [ -z "${{ secrets.LIVEKIT_API_KEY }}" ] || [ -z "${{ secrets.LIVEKIT_API_SECRET }}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping evals: set the LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET repository secrets to run them."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@v5
+        if: steps.secrets.outputs.present == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
+
+      - run: uv sync --frozen
+        if: steps.secrets.outputs.present == 'true'
+
+      - name: Run evals
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+        run: uv run pytest -m eval -q
+
+      - name: Upload eval output
+        if: always() && steps.secrets.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-evals
+          path: agent/evals/
+          if-no-files-found: ignore
