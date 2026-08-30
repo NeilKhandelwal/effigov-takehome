@@ -130,35 +130,64 @@ export type CaseEvent = {
 
 export const getCaseEvents = (id: string) => request<CaseEvent[]>(`/cases/${id}/events`);
 
-// Subscribes to WS /ws and calls refetch() on every frame (frames carry no payload,
-// they just mean "something changed"). Reconnects 2s after close. Callers keep their
-// 2s poll as the fallback when the socket is down. Returns whether the socket is up.
-export function useLiveRefresh(refetch: () => void) {
+// Poll only when the socket is down, and only if the caller asked for one (pollMs: 0
+// means "never poll" — Nav wants the dot, not the traffic). Pure so the rule is testable
+// without a browser.
+export const shouldPoll = (connected: boolean, pollMs: number) => !connected && pollMs > 0;
+
+// Subscribes to WS /ws and calls refetch() on every frame (frames carry no payload, they
+// just mean "something changed"), once on mount, and once on every open so a reconnect
+// catches up on what it missed while it was down. Reconnects 2s after close. The pollMs
+// interval is the fallback: it runs only while the socket is down. Returns whether the
+// socket is up.
+export function useLiveRefresh(refetch: () => void, { pollMs = 2000 }: { pollMs?: number } = {}) {
   const latest = useRef(refetch);
   const [connected, setConnected] = useState(false);
   useEffect(() => {
     latest.current = refetch;
   });
+  // What each page used to do itself: fetch on mount, and again whenever refetch changes
+  // identity (a new :id in the route, an edit that stops being dirty).
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
   useEffect(() => {
     let ws: WebSocket | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let poll: ReturnType<typeof setInterval> | undefined;
     let unmounted = false;
+    const setPolling = (on: boolean) => {
+      if (on === !!poll) return;
+      if (on) {
+        poll = setInterval(() => latest.current(), pollMs);
+      } else {
+        clearInterval(poll);
+        poll = undefined;
+      }
+    };
     const connect = () => {
       ws = new WebSocket(API.replace(/^http/, "ws") + "/ws");
-      ws.onopen = () => setConnected(true);
+      ws.onopen = () => {
+        setConnected(true);
+        setPolling(false);
+        latest.current(); // catch up on everything that changed while the socket was down
+      };
       ws.onmessage = () => latest.current();
+      ws.onerror = () => setPolling(shouldPoll(false, pollMs));
       ws.onclose = () => {
         setConnected(false);
-        if (!unmounted) timer = setTimeout(connect, 2000);
+        setPolling(shouldPoll(false, pollMs));
+        if (!unmounted) retry = setTimeout(connect, 2000);
       };
     };
     connect();
     return () => {
       unmounted = true;
-      clearTimeout(timer);
+      clearTimeout(retry);
+      setPolling(false);
       ws?.close();
     };
-  }, []);
+  }, [pollMs]);
   return connected;
 }
 

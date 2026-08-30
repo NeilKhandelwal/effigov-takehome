@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Call, ago, caseIdsOf, duration, listCalls, useLiveRefresh, useNow } from "@/lib/api";
 
 type Filter = "all" | "live" | "ended" | "unlinked";
@@ -27,11 +27,6 @@ export default function CallsPage() {
     [],
   );
 
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 2000);
-    return () => clearInterval(timer);
-  }, [load]);
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
 

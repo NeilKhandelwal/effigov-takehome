@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLiveRefresh } from "@/lib/api";
 
+const NOOP = () => {};
+
 const LINKS = [
   { href: "/", label: "Cases" },
   { href: "/calls", label: "Calls" },
@@ -12,7 +14,9 @@ const LINKS = [
 
 export default function Nav() {
   const path = usePathname();
-  const live = useLiveRefresh(() => {}); // only here to show connection state
+  // The dot only needs the socket state, so no poll: pollMs 0 keeps Nav off the wire
+  // while every page already refetches for itself.
+  const live = useLiveRefresh(NOOP, { pollMs: 0 });
 
   return (
     <header className="bg-slate-900 text-white">
