@@ -7,7 +7,7 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
     PATH="/app/.venv/bin:$PATH" \
-    CASES_DB=/data/cases.db
+    DATABASE_URL=sqlite:////data/cases.db
 
 WORKDIR /app
 
@@ -18,14 +18,13 @@ RUN uv sync --frozen --no-dev
 
 COPY . .
 
-# seed only on an empty volume; a restart must not touch an existing DB
-RUN printf '%s\n' \
+# migrate on every boot, then seed -- seed is a no-op unless the cases table is empty,
+# so a restart never touches an existing database
+RUN mkdir -p /data && printf '%s\n' \
     '#!/bin/sh' \
     'set -e' \
-    'if [ ! -f "$CASES_DB" ]; then' \
-    '  mkdir -p "$(dirname "$CASES_DB")"' \
-    '  python -m scripts.seed' \
-    'fi' \
+    'alembic upgrade head' \
+    'python -m scripts.seed' \
     'exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 8000
