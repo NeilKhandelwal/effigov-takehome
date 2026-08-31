@@ -110,6 +110,7 @@ case_events = Table(
     Column("old_value", String),
     Column("new_value", String),
     Column("source", String, nullable=False),
+    Column("actor", String),  # NULL = nobody named: a voice call, or a write from before 0003
     Column("ts", String, nullable=False),
     Index("case_events_case", "case_id"),
 )

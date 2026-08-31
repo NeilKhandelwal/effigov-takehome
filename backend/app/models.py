@@ -104,5 +104,6 @@ class CaseEvent(BaseModel):
     field: str
     old_value: str | None
     new_value: str | None
-    source: str
+    source: str  # which system wrote it: "staff" or "voice"
+    actor: str | None  # which person, from X-Actor; None on a voice call and on pre-0003 rows
     ts: str
