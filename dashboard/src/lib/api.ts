@@ -74,8 +74,12 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const listCases = () => request<Case[]>("/cases");
 export const getCase = (id: string) => request<Case>(`/cases/${id}`);
-export const patchCase = (id: string, body: Partial<Case>) =>
+// notes is deliberately not patchable: the backend answers 422 (CONTRACT "## Data layer").
+export const patchCase = (id: string, body: Partial<Pick<Case, "status" | "issue_type" | "description">>) =>
   request<Case>(`/cases/${id}`, json("PATCH", body));
+// One POST appends one note, so two people writing in the same second both keep theirs.
+export const addNote = (id: string, text: string) =>
+  request<CaseEvent>(`/cases/${id}/notes`, json("POST", { text }));
 
 // ---- Stretch: calls + transcripts (see ../CONTRACT.md "## Stretch") ----
 
@@ -130,7 +134,8 @@ export const listCallsByRoom = (room: string) =>
 export type CaseEvent = {
   id: number;
   case_id: string;
-  field: "created" | "status" | "notes" | "issue_type" | "description" | "call_linked" | "looked_up";
+  // "note" is the note itself: its text is new_value, and it carries its own source and ts
+  field: "created" | "status" | "note" | "issue_type" | "description" | "call_linked" | "looked_up";
   old_value: string | null;
   new_value: string | null;
   source: "voice" | "staff";
