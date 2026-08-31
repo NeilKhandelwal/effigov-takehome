@@ -106,11 +106,31 @@ def test_public_ids_round_trip(pk):
     assert db.case_id(1) == "C-1001" and db.call_id(7) == "CALL-7"
 
 
-@pytest.mark.parametrize("bad", ["garbage", "C-", "CALL-x", "", "C-nine"])
+@pytest.mark.parametrize("bad", ["garbage", "C-", "CALL-x", "", "C-nine",
+                                 "C-99999999999999999999999", "CALL-99999999999999999999999",
+                                 "C-0", "CALL--5"])
 def test_malformed_public_ids_are_none_so_endpoints_404(bad):
-    """A caller reading a mangled id back to the agent must get "no such case", not a 500."""
+    """A caller reading a mangled id back to the agent must get "no such case", not a 500.
+    Out-of-range is malformed too: the id columns are 4-byte integers, so a number past that
+    is not a missing row, it is a bind the driver refuses — a 500 on somebody's typo."""
     assert db.case_pk(bad) is None
     assert db.call_pk(bad) is None
+
+
+def test_out_of_range_public_ids_404_on_every_endpoint_that_takes_one(client):
+    """The path the reviewer walked: a huge id reached the driver and came back a 500."""
+    huge_case, huge_call = "C-99999999999999999999999", "CALL-99999999999999999999999"
+    client.post("/calls")
+    assert client.get(f"/cases/{huge_case}").status_code == 404
+    assert client.get(f"/cases/{huge_case}/events").status_code == 404
+    assert client.get(f"/cases/{huge_case}/calls").status_code == 404
+    assert client.patch(f"/cases/{huge_case}", json={"status": "resolved"}).status_code == 404
+    assert client.post(f"/cases/{huge_case}/notes", json={"text": "x"}).status_code == 404
+    assert client.get(f"/calls/{huge_call}").status_code == 404
+    assert client.patch(f"/calls/{huge_call}", json={"status": "ended"}).status_code == 404
+    assert client.post(f"/calls/{huge_call}/transcript", json={"role": "user", "text": "x"}).status_code == 404
+    assert client.patch("/calls/CALL-1", json={"case_id": huge_case}).status_code == 404
+    assert client.post("/calls/CALL-1/cases", json={"case_id": huge_case}).status_code == 404
 
 
 def test_database_rejects_a_link_to_a_case_that_does_not_exist(client):

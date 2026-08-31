@@ -182,16 +182,28 @@ def init_db() -> None:
 
 
 # Public ids are derived here and nowhere else; the database only ever stores the integer.
+# The id columns are 4-byte integers, which is what bounds a parsed id: a bigger number is
+# not a row that is missing, it is a value the driver refuses to bind (Postgres raises
+# NumericValueOutOfRange, SQLite overflows), and that would be a 500 on a typo.
+MAX_PK = 2**31 - 1
+
+
+def _parse_pk(public_id: str, prefix: str, offset: int) -> int | None:
+    """A public id back to its row id, or None for anything that cannot be one, so every
+    endpoint answers 404 rather than 500."""
+    try:
+        pk = int(public_id.removeprefix(prefix)) - offset
+    except ValueError:
+        return None
+    return pk if 0 <= pk <= MAX_PK else None
+
+
 def case_id(pk: int) -> str:
     return f"C-{1000 + pk}"
 
 
 def case_pk(case_id: str) -> int | None:
-    # "C-1001" -> 1; anything malformed -> None (so lookups 404 instead of 500)
-    try:
-        return int(case_id.removeprefix("C-")) - 1000
-    except ValueError:
-        return None
+    return _parse_pk(case_id, "C-", 1000)  # "C-1001" -> 1
 
 
 def call_id(pk: int) -> str:
@@ -199,10 +211,7 @@ def call_id(pk: int) -> str:
 
 
 def call_pk(call_id: str) -> int | None:
-    try:
-        return int(call_id.removeprefix("CALL-"))
-    except ValueError:
-        return None
+    return _parse_pk(call_id, "CALL-", 0)
 
 
 def row_to_case(row: Row) -> dict:
