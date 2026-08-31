@@ -48,7 +48,7 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
 
 ## Phase 3 — Access
 
-- [ ] **Staff auth on the dashboard** — Auth.js with credentials first; OAuth once there
+- [x] **Staff auth on the dashboard** — Auth.js with credentials first; OAuth once there
       are provider keys.
       *Done when:* every dashboard route redirects an unauthenticated visitor to a login
       page.
