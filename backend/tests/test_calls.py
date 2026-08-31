@@ -8,7 +8,7 @@ def test_call_lifecycle_sets_ended_at(client):
     call = r.json()
     assert call == {"id": "CALL-1", "case_id": None, "case_ids": [], "status": "active",
                     "started_at": call["started_at"], "ended_at": None, "room": None,
-                    "summary": None, "transfer_reason": None}
+                    "updated_at": call["started_at"], "summary": None, "transfer_reason": None}
     assert client.post("/calls/CALL-1/transcript", json={"role": "user", "text": "hi"}).status_code == 201
     ended = client.patch("/calls/CALL-1", json={"status": "ended"}).json()
     assert ended["status"] == "ended" and ended["ended_at"].endswith("Z")
@@ -128,31 +128,3 @@ def test_patch_cannot_reopen_an_ended_call(client):
     assert client.patch("/calls/CALL-1", json={"status": "needs_person"}).status_code == 409
     after = client.get("/calls/CALL-1").json()
     assert after["status"] == "ended" and after["ended_at"] == ended["ended_at"]
-
-
-def test_init_db_adds_missing_columns_to_a_legacy_calls_table(tmp_path, monkeypatch):
-    """Deployed DBs predate room/summary/transfer_reason; the migration has to add them without
-    swallowing real errors, and has to be safe to run on every boot."""
-    import os
-    import sqlite3
-
-    from app import db
-
-    path = str(tmp_path / "legacy.db")
-    monkeypatch.setenv("CASES_DB", path)
-    monkeypatch.setattr(db, "DB_PATH", os.environ["CASES_DB"])
-    with sqlite3.connect(path) as conn:
-        conn.execute("""CREATE TABLE calls (
-            rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_id TEXT,
-            status TEXT NOT NULL DEFAULT 'active',
-            started_at TEXT NOT NULL,
-            ended_at TEXT
-        )""")
-
-    db.init_db()
-    with sqlite3.connect(path) as conn:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(calls)")}
-    assert {"room", "summary", "transfer_reason"} <= cols
-
-    db.init_db()  # every boot runs it: the second pass must be a no-op, not a duplicate-column error

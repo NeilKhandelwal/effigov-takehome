@@ -18,7 +18,6 @@ class CaseCreate(BaseModel):
 
 class CaseUpdate(BaseModel):
     status: Status | None = None
-    notes: str | None = None
     issue_type: IssueType | None = None
     description: str | None = None
 
@@ -30,7 +29,7 @@ class Case(BaseModel):
     issue_type: IssueType | None
     description: str
     status: Status
-    notes: str
+    notes: str  # derived: every field="note" event on the case, oldest first, joined by "\n"
     created_at: str
     updated_at: str
 
@@ -63,6 +62,7 @@ class Call(BaseModel):
     status: CallStatus
     started_at: str
     ended_at: str | None
+    updated_at: str  # bumped on every write to the call; what GET /calls?since= compares
     room: str | None
     summary: str | None
     transfer_reason: str | None

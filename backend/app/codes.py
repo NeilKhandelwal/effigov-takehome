@@ -1,8 +1,10 @@
 """Three-word lookup codes: the phone number finds nothing, the code is what proves it's you."""
 import re
 import secrets
-import sqlite3
 
+from sqlalchemy import select
+
+from app import db
 from app.words import WORDS
 
 FILLERS = {"and", "dash"}  # callers glue the words together: "blue and river dash maple"
@@ -13,9 +15,12 @@ def normalize(spoken: str) -> str:
     return "-".join(words)
 
 
-def new_code(conn: sqlite3.Connection) -> str:
-    # 27M combinations, so the retry almost never runs; checking beats an index we'd never use
+def new_code(conn) -> str:
+    # 27M combinations, so the retry almost never runs
     while True:
         code = "-".join(secrets.choice(WORDS) for _ in range(3))
-        if conn.execute("SELECT 1 FROM cases WHERE lookup_code = ?", (code,)).fetchone() is None:
+        taken = conn.execute(
+            select(db.cases.c.id).where(db.cases.c.lookup_code == code)
+        ).fetchone()
+        if taken is None:
             return code

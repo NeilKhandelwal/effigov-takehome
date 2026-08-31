@@ -2,14 +2,29 @@
 
 Run with the server up or down: `uv run python -m scripts.reset_demo`.
 """
+from sqlalchemy import delete, text
+
 from app import db
 from scripts.seed import SAMPLES, seed
 
+# children before parents: the foreign keys are real now
+TABLES = ("transcript", "call_cases", "case_events", "calls", "cases")
+
+
+def reset() -> None:
+    with db.connect() as conn:
+        for table in TABLES:
+            conn.execute(delete(db.metadata.tables[table]))
+        # restart the id counters so ids are C-1001.. again; each engine spells it its own way
+        if conn.engine.dialect.name == "sqlite":
+            conn.execute(text("DELETE FROM sqlite_sequence"))
+        else:
+            for table in ("cases", "calls", "transcript", "case_events"):
+                conn.execute(text(f"ALTER SEQUENCE {table}_id_seq RESTART WITH 1"))
+
+
 if __name__ == "__main__":
     db.init_db()
-    with db.connect() as conn:
-        for table in ("transcript", "call_cases", "calls", "case_events", "cases"):
-            conn.execute(f"DELETE FROM {table}")
-        conn.execute("DELETE FROM sqlite_sequence")  # restart AUTOINCREMENT so ids are C-1001.. again
+    reset()
     seed()
     print(f"reset: {len(SAMPLES)} cases, 0 calls")

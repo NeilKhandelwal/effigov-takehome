@@ -1,6 +1,8 @@
 """Insert 3 sample cases if the table is empty. Safe to re-run."""
 from datetime import datetime, timezone
 
+from sqlalchemy import func, insert, select
+
 from app import codes, db
 
 SAMPLES = [
@@ -12,25 +14,22 @@ SAMPLES = [
 def seed() -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with db.connect() as conn:
-        if conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]:
+        if conn.execute(select(func.count()).select_from(db.cases)).scalar():
             print("cases table not empty, skipping seed")
-        else:
-            for sample in SAMPLES:
-                code = codes.new_code(conn)
-                cur = conn.execute(
-                    "INSERT INTO cases (name, phone, issue_type, description, lookup_code, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (*sample, code, ts, ts),
-                )
-                # seeded cases get a 'created' audit row too, so their History isn't empty
-                conn.execute(
-                    "INSERT INTO case_events (case_id, field, old_value, new_value, source, ts) "
-                    "VALUES (?, 'created', NULL, ?, 'seed', ?)",
-                    (db.case_id(cur.lastrowid), db.case_id(cur.lastrowid), ts),
-                )
-                # printed so a rehearsal can call in with a code that already exists
-                print(f"{db.case_id(cur.lastrowid)} {code}")
-            print(f"seeded {len(SAMPLES)} cases")
+            return
+        for name, phone, issue_type, description in SAMPLES:
+            code = codes.new_code(conn)
+            cur = conn.execute(insert(db.cases).values(
+                name=name, phone=phone, issue_type=issue_type, description=description,
+                lookup_code=code, created_at=ts, updated_at=ts))
+            pk = cur.inserted_primary_key[0]
+            # seeded cases get a 'created' audit row too, so their History isn't empty
+            conn.execute(insert(db.case_events).values(
+                case_id=pk, field="created", old_value=None, new_value=db.case_id(pk),
+                source="seed", ts=ts))
+            # printed so a rehearsal can call in with a code that already exists
+            print(f"{db.case_id(pk)} {code}")
+        print(f"seeded {len(SAMPLES)} cases")
 
 
 if __name__ == "__main__":
