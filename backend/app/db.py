@@ -10,11 +10,16 @@ and Postgres store and compare them identically.
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import (Column, ForeignKey, Index, Integer, MetaData, Row, String, Table,
-                        create_engine, event)
+                        create_engine, event, inspect)
 from sqlalchemy.engine import Engine
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+# by path, not by cwd: the app, the alembic CLI and the scripts all have to read the same
+# DATABASE_URL whichever directory they were started from. Never overrides a real env var.
+load_dotenv(BACKEND_DIR / ".env")
 
 
 def database_url() -> str:
@@ -140,11 +145,37 @@ def connect():
     return engine().begin()
 
 
+# tables the pre-migration sqlite3 layer created; a file holding these and no alembic_version
+# was written before this schema existed
+LEGACY_TABLES = {"cases", "calls", "transcript", "case_events"}
+
+
+def refuse_legacy_database() -> None:
+    """Stop before the first CREATE TABLE if this database predates migrations.
+
+    Upgrading such a file would run the initial migration against tables that already exist.
+    SQLite DDL is not transactional, so the failure lands halfway: some new tables created,
+    the rest not, and the next boot fails on a different table. There is no in-place upgrade
+    from that schema -- the ids and the notes column both changed shape -- so refuse loudly
+    while the file is still intact.
+    """
+    tables = set(inspect(engine()).get_table_names())
+    if "alembic_version" in tables or not tables & LEGACY_TABLES:
+        return  # already versioned, or empty enough that there is nothing to collide with
+    raise RuntimeError(
+        f"{database_url()} predates migrations: it has "
+        f"{sorted(tables & LEGACY_TABLES)} but no alembic_version table, so there is nothing "
+        "to upgrade from. Move the database aside (or delete it) and let this start empty -- "
+        "`uv run python -m scripts.reset_demo` then rebuilds it with the sample cases."
+    )
+
+
 def init_db() -> None:
     """Bring the database up to head. The only schema path there is; app startup calls it."""
     from alembic import command
     from alembic.config import Config
 
+    refuse_legacy_database()  # before any DDL: a half-migrated file is worse than a refusal
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "migrations"))
     command.upgrade(cfg, "head")

@@ -6,13 +6,18 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import create_engine
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so `app` imports under any cwd
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BACKEND_DIR))  # so `app` imports under any cwd
 
-from app import db  # noqa: E402
+from app import db  # noqa: E402  -- importing it also loads backend/.env, so a CLI
+# `alembic upgrade head` targets the same database the app does
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: init_db() calls this inside the app's startup, and the
+    # default would switch off every logger already configured -- uvicorn's access and error
+    # logs included, for the life of the process
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def run_migrations_offline() -> None:

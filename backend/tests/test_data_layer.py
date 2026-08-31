@@ -1,5 +1,6 @@
 """What the data layer itself has to guarantee: migrations, foreign keys, ids, ?since=."""
 import os
+import sqlite3
 
 import pytest
 from sqlalchemy import inspect, insert, select
@@ -8,6 +9,70 @@ from sqlalchemy.exc import IntegrityError
 from app import db
 from tests.conftest import wipe
 from tests.test_cases import BODY
+
+
+# the shape backend/app/db.py wrote before this branch: our table names, no alembic_version
+LEGACY_SCHEMA = """
+CREATE TABLE cases (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT NOT NULL,
+    issue_type TEXT, description TEXT NOT NULL, lookup_code TEXT,
+    status TEXT NOT NULL DEFAULT 'open', notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE calls (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, ended_at TEXT,
+    room TEXT, summary TEXT, transfer_reason TEXT);
+CREATE TABLE call_cases (
+    call_id TEXT NOT NULL, case_id TEXT NOT NULL, how TEXT NOT NULL, linked_at TEXT NOT NULL,
+    PRIMARY KEY (call_id, case_id));
+CREATE TABLE transcript (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, call_id TEXT NOT NULL, role TEXT NOT NULL,
+    text TEXT NOT NULL, ts TEXT NOT NULL);
+CREATE TABLE case_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT NOT NULL, field TEXT NOT NULL,
+    old_value TEXT, new_value TEXT, source TEXT NOT NULL, ts TEXT NOT NULL);
+"""
+
+
+def test_a_database_from_before_migrations_is_refused_with_the_file_intact(tmp_path, monkeypatch):
+    """A deployed cases.db still has the old shape. Upgrading it runs CREATE TABLE over tables
+    that already exist, and SQLite DDL is not transactional: the boot dies partway through with
+    some new tables created, and the next boot dies on a different one. There is no in-place
+    upgrade — the ids and the notes column both changed shape — so the only safe answer is to
+    refuse before the first statement and say what to do."""
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(LEGACY_SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{path}")
+    db.reset_engine()
+    try:
+        with pytest.raises(RuntimeError, match="predates migrations"):
+            db.init_db()
+        conn = sqlite3.connect(path)
+        after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        conn.close()
+        # nothing was written: no half-created tables for the next boot to trip over
+        assert "cities" not in after and "alembic_version" not in after
+        db.reset_engine()
+        with pytest.raises(RuntimeError, match="predates migrations"):
+            db.init_db()  # and the refusal is stable, not a different error each time
+    finally:
+        db.reset_engine()
+
+
+def test_an_empty_database_migrates_and_a_migrated_one_is_left_alone(tmp_path, monkeypatch):
+    """The guard only ever catches the legacy shape. A clean clone has no file at all, and
+    every boot after the first runs against a database this code already migrated."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'clean.db'}")
+    db.reset_engine()
+    try:
+        db.init_db()  # empty: nothing to collide with
+        db.init_db()  # versioned: alembic_version says head, so the guard stands aside
+        assert "cases" in set(inspect(db.engine()).get_table_names())
+    finally:
+        db.reset_engine()
 
 
 def test_migration_builds_the_whole_schema_from_an_empty_database(tmp_path, monkeypatch):
