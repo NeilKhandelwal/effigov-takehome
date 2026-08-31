@@ -46,10 +46,19 @@ export function duration(start: string, end: string | null) {
 
 export const BACKEND_DOWN = `Backend unreachable at ${API}`;
 
+// Who is on the keyboard, for the audit log. Nav sets it from the session; when nobody is
+// signed in (auth disabled in dev) the header is simply left off. The backend starts
+// recording X-Actor in a later PR and ignores it until then, so this is safe to send now.
+let actor: string | null = null;
+export const setActor = (name: string | null) => {
+  actor = name;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(API + path, { cache: "no-store", ...init });
+    const headers = { ...init?.headers, ...(actor ? { "X-Actor": actor } : {}) };
+    res = await fetch(API + path, { cache: "no-store", ...init, headers });
   } catch {
     throw new Error(BACKEND_DOWN);
   }

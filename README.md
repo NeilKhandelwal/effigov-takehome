@@ -99,6 +99,7 @@ uv sync && uv run python src/agent.py download-files   # once: turn-detector / V
 uv run python src/agent.py dev
 ```
 - Env vars: `NEXT_PUBLIC_API_URL` (dashboard → backend, default `http://localhost:8000`) and `CORS_ORIGINS` (backend, comma-separated, default `http://localhost:3000`) — both listed in the matching `.env.example`.
+- Staff login: set `AUTH_SECRET` (`openssl rand -base64 32`) and `STAFF_USERS="name:hash,..."` in `dashboard/.env.local`, where each hash comes from `cd dashboard && npm run hash-password -- <password>`. **Dev-only shortcut:** leave `STAFF_USERS` unset and dashboard auth is disabled entirely — every route is open, the nav shows nobody, and the server logs one warning at startup — so a fresh clone and `docker compose up` still work with nothing configured. Never deploy with it unset.
 
 Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
 
@@ -134,6 +135,10 @@ Two kinds, and only one of them costs money.
 audit log, call/case linking, and code lookup) and `cd agent && uv run pytest` (12 tests over the
 agent's pure helpers — phone validation, code normalization, the filed/second-case gates, summary
 assembly). These are what CI runs.
+
+**Dashboard** — no test runner; `cd dashboard && npm run lint && npm run build` is the check CI
+runs. The staff-login flow was verified by hand against a dev server: see the commands and output
+in the pull request that added it.
 
 **Evals** — `cd agent && uv run pytest -m eval` runs 21 hand-labelled scenarios through the real
 `Assistant` and the real backend in-process, and checks which tools it called with what, what the
