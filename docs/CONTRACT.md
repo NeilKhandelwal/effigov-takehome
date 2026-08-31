@@ -128,10 +128,18 @@ The endpoints and every payload above are unchanged except where this section sa
     everywhere else. Broadcasts `{"type": "case", "id": ...}` and bumps the case's `updated_at`.
   - `Case.notes` stays in the JSON, derived: those rows joined by `"\n"`, oldest first.
   - `PATCH /cases/{id}` with `notes` -> 422. Ignoring it would swallow a staff edit.
-- **`since` cursor.** `GET /cases?since=<ISO>` and `GET /calls?since=<ISO>` return only rows
-  written strictly after the cursor — cases by `updated_at`, calls by `updated_at`, which is new
-  on calls and bumped by every write to the call, transcript lines included. Omitted still means
-  everything. Timestamps are the same `...Z` strings, compared as strings.
+- **`since` cursor.** `GET /cases?since=<ISO>` and `GET /calls?since=<ISO>` return rows written
+  **at or after** the cursor — cases by `updated_at`, calls by `updated_at`, which is new on calls
+  and bumped by every write to the call, transcript lines included. Omitted still means everything.
+  Timestamps are the same `...Z` strings, compared as strings.
+  - Inclusive, deliberately: they are second-resolution, so a strict comparison would drop every
+    row written in the cursor's own second and never return it. Clients may see one row twice,
+    which costs nothing — they already refetch on every WS frame.
+  - A `since` that is not an ISO-8601 timestamp is a **422**. Matching nothing would be
+    indistinguishable from "nothing has changed".
+- **Startup.** A database written before these migrations (the old tables, no `alembic_version`)
+  is refused at startup with a message saying to move it aside; there is no in-place upgrade, and
+  a half-applied one would be worse. An empty or already-migrated database starts normally.
 - **`city_id`** is on `cases`, `calls` and `case_events`, defaulted to the one seeded city
   (`cities` row 1, "Demo City"). It is internal for now: not in any response body, not a filter.
   Scoping reads by city is Phase 2's next item.

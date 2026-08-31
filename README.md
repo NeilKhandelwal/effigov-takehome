@@ -81,13 +81,16 @@ JSON, derived from those rows; `PATCH /cases/{id}` refuses `notes` with a 422 ra
 a local clone needs no infrastructure; compose and CI run `postgresql+psycopg://…` against
 `postgres:16`. The schema lives in Alembic migrations under `backend/migrations/`, applied by
 `alembic upgrade head` at app startup and in the Docker entrypoint; nothing else creates or alters a
-table. Foreign keys are on (SQLite gets `PRAGMA foreign_keys=ON` per connection), so the database
-itself rejects a call linked to a case that does not exist. Every row also carries a `city_id`,
+table, and a database written before those migrations is refused at startup rather than half-upgraded
+in place. Foreign keys are on (SQLite gets `PRAGMA foreign_keys=ON` per connection), so the database
+itself rejects a call linked to a case that does not exist, and `lookup_code` is unique. Every row also carries a `city_id`,
 defaulted to the one seeded city — internal for now, and not in any response.
 
 **Reading only what changed.** `GET /cases?since=<ISO>` and `GET /calls?since=<ISO>` return rows
-written strictly after the cursor; calls carry an `updated_at` that every write to the call bumps,
-transcript lines included.
+written at or after the cursor; calls carry an `updated_at` that every write to the call bumps,
+transcript lines included. Inclusive on purpose — timestamps are second-resolution, so a strict
+comparison would silently drop anything written in the cursor's own second. A `since` that is not a
+timestamp is a 422, not an empty list.
 
 **Lookup codes.** Three words drawn from a 300-word list (27 million combinations), generated on
 case creation and checked for collisions against the table. `POST /cases` is the only response that
@@ -149,9 +152,10 @@ Compose runs `postgres:16` on the named volume `pg-data`; the backend waits for 
 
 Two kinds, and only one of them costs money.
 
-**Unit** — offline, no keys, no LLM. `cd backend && uv run pytest` (53 tests over the endpoints, the
+**Unit** — offline, no keys, no LLM. `cd backend && uv run pytest` (63 tests over the endpoints, the
 audit log, call/case linking, code lookup, notes-as-events, the `since` cursor, and the migration and
-foreign keys themselves; set `DATABASE_URL` to run the identical suite against Postgres) and `cd agent && uv run pytest` (12 tests over the
+foreign keys themselves, and the refusal to boot on a pre-migration database; set `DATABASE_URL` to
+run the identical suite against Postgres) and `cd agent && uv run pytest` (12 tests over the
 agent's pure helpers — phone validation, code normalization, the filed/second-case gates, summary
 assembly). These are what CI runs.
 
@@ -176,7 +180,7 @@ every payload, is in [docs/CONTRACT.md](docs/CONTRACT.md).
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/cases` | body `{name, phone, issue_type?, description}`; `issue_type` is null until classified. The only response that carries `lookup_code` |
-| `GET` | `/cases[?phone=&since=]` | newest first; `phone` matches digits only; `since` returns only rows updated after an ISO timestamp |
+| `GET` | `/cases[?phone=&since=]` | newest first; `phone` matches digits only; `since` returns rows updated at or after an ISO timestamp (422 if it is not one) |
 | `GET` / `PATCH` | `/cases/{id}` | PATCH any of `status`, `issue_type`, `description`; header `X-Source` (`staff` default, agent sends `voice`). `notes` is refused with a 422 — it moved to the row below |
 | `POST` | `/cases/{id}/notes` | body `{text}` → 201 the `note` event; appends one note, `X-Source` as elsewhere |
 | `GET` | `/cases/lookup?code=` | three spoken words (`blue river maple`, `Blue and River dash Maple`) → the case; 404 `no case for that code` for unknown *and* malformed; 5th wrong code on one `X-Call-Id` → 429 |
