@@ -54,12 +54,19 @@ TranscriptLine: {"id": 12, "call_id": "CALL-7", "role": "user"|"agent", "text": 
 Every case write is logged; the dashboard shows it on case detail.
 ```json
 CaseEvent: {"id": 3, "case_id": "C-1001", "field": "status", "old_value": "open", "new_value": "in_progress",
-            "source": "voice", "ts": "...Z"}
+            "source": "staff", "actor": "neil", "ts": "...Z"}
 ```
 - `GET /cases/{id}/events` -> [CaseEvent] oldest first | 404
 - Written by: POST /cases (field="created", new_value=case id); PATCH /cases/{id} (one per field that
   actually changed; unchanged fields skipped); PATCH /calls/{id} with case_id (field="call_linked", new_value=call id).
-- `source` = request header `X-Source` (default "staff"). Agent sends `X-Source: voice` on every write.
+- Who: `source` says which **system**, `actor` says which **person**. They are separate fields and
+  both are recorded on every event, by the one helper that writes `case_events`.
+  - `source` = request header `X-Source` (default "staff"). Agent sends `X-Source: voice` on every write.
+  - `actor` = request header `X-Actor`, the signed-in staff name the dashboard stamps on every
+    request. Stripped and capped at 64 chars; absent, empty or blank -> `null`. Voice calls have no
+    actor, and rows written before the column existed have none either — `null` renders as nothing.
+  - The API does not authenticate `X-Actor` yet: it records what it is told. The dashboard's
+    Auth.js session is the only thing behind the name until backend auth lands.
 
 ## Agent tools (LiveKit function tools, call backend via httpx)
 - create_case(name, phone) -> "Started case C-1001" (opens with issue_type="other", description=""; refuses non-10-digit phones)
