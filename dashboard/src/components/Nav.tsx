@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useLiveRefresh } from "@/lib/api";
+import { signOut } from "next-auth/react";
+import { setActor, useLiveRefresh } from "@/lib/api";
 
 const NOOP = () => {};
 
@@ -12,8 +13,13 @@ const LINKS = [
   { href: "/call", label: "Start a call" },
 ];
 
-export default function Nav() {
+// name is null when nobody is signed in — either the visitor is on /login, or STAFF_USERS
+// is unset and auth is off (dev only). Either way Nav shows no identity and no sign-out.
+export default function Nav({ name }: { name: string | null }) {
   const path = usePathname();
+  // During render, not in an effect: the pages below fetch on mount, and those first
+  // requests should already carry X-Actor.
+  setActor(name);
   // The dot only needs the socket state, so no poll: pollMs 0 keeps Nav off the wire
   // while every page already refetches for itself.
   const live = useLiveRefresh(NOOP, { pollMs: 0 });
@@ -43,6 +49,15 @@ export default function Nav() {
           <span className={`h-2 w-2 rounded-full ${live ? "bg-emerald-400" : "bg-amber-400"}`} />
           {live ? "Live" : "Polling"}
         </span>
+        {name && (
+          <span className="flex items-center gap-3 text-xs text-slate-300">
+            <span className="text-slate-400">·</span>
+            <span className="text-white">{name}</span>
+            <button onClick={() => signOut({ redirectTo: "/login" })} className="hover:text-white underline-offset-2 hover:underline">
+              Sign out
+            </button>
+          </span>
+        )}
       </div>
     </header>
   );
