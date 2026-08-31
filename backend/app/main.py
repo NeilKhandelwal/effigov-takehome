@@ -13,8 +13,8 @@ from sqlalchemy import insert, select, update
 
 from app import codes, db
 from app.models import (Call, CallCaseLink, CallCreate, CallDetail, CallStatus, CallUpdate, Case,
-                        CaseCreate, CaseCreated, CaseEvent, CaseUpdate, TranscriptCreate,
-                        TranscriptLine)
+                        CaseCreate, CaseCreated, CaseEvent, CaseUpdate, NoteCreate,
+                        TranscriptCreate, TranscriptLine)
 
 load_dotenv(".env")  # LIVEKIT_* for /token, CORS_ORIGINS; python-dotenv ships with uvicorn[standard]
 
@@ -204,10 +204,13 @@ async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> Case
 
 
 @app.get("/cases")
-def list_cases(phone: str | None = None) -> list[Case]:
+def list_cases(phone: str | None = None, since: str | None = None) -> list[Case]:
     q = select(db.cases)
     if phone is not None:
         q = q.where(db.cases.c.phone == digits(phone))
+    if since is not None:
+        # timestamps are ISO-8601 Z strings, so "later than" is a plain string comparison
+        q = q.where(db.cases.c.updated_at > since)
     with db.connect() as conn:
         return to_cases(conn, conn.execute(q.order_by(db.cases.c.id.desc())).fetchall())
 
@@ -256,6 +259,20 @@ async def update_case(case_id: str, body: CaseUpdate, x_source: str = Header("st
     return case
 
 
+@app.post("/cases/{case_id}/notes", status_code=201)
+async def add_case_note(case_id: str, body: NoteCreate,
+                        x_source: str = Header("staff")) -> CaseEvent:
+    """One POST appends one note. No read-modify-write, so two writers can't lose a note."""
+    case_pk = db.case_pk(case_id)
+    with db.connect() as conn:
+        case = fetch_case(conn, case_pk)  # 404 before touching anything
+        event = log_event(conn, case_pk, "note", None, body.text, x_source)
+        # the note is the case's newest change, and ?since= has to see it
+        conn.execute(update(db.cases).where(db.cases.c.id == case_pk).values(updated_at=event.ts))
+    await broadcast("case", case.id)
+    return event
+
+
 @app.get("/cases/{case_id}/events")
 def list_case_events(case_id: str) -> list[CaseEvent]:
     with db.connect() as conn:
@@ -290,11 +307,14 @@ async def create_call(body: CallCreate = CallCreate()) -> Call:
 
 
 @app.get("/calls")
-def list_calls(status: CallStatus | None = None, room: str | None = None) -> list[Call]:
+def list_calls(status: CallStatus | None = None, room: str | None = None,
+               since: str | None = None) -> list[Call]:
     q = select(db.calls)
     for column, value in (("status", status), ("room", room)):
         if value is not None:
             q = q.where(db.calls.c[column] == value)
+    if since is not None:
+        q = q.where(db.calls.c.updated_at > since)
     with db.connect() as conn:
         rows = conn.execute(q.order_by(db.calls.c.id.desc())).fetchall()
         return [to_call(conn, r) for r in rows]

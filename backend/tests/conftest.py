@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 
-def _wipe(url: str) -> None:
+def wipe(url: str) -> None:
     """Postgres runs are against one shared database, so each test starts from nothing —
     schema and all, so alembic runs again and the id sequences restart at C-1001 / CALL-1."""
     from sqlalchemy import create_engine
@@ -25,7 +25,7 @@ def client(tmp_path, monkeypatch):
     from app import db
 
     if url:
-        _wipe(url)
+        wipe(url)
     else:
         monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     db.reset_engine()

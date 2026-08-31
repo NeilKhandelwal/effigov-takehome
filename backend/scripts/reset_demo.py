@@ -15,10 +15,9 @@ def reset() -> None:
     with db.connect() as conn:
         for table in TABLES:
             conn.execute(delete(db.metadata.tables[table]))
-        # restart the id counters so ids are C-1001.. again; each engine spells it its own way
-        if conn.engine.dialect.name == "sqlite":
-            conn.execute(text("DELETE FROM sqlite_sequence"))
-        else:
+        # ids have to start at C-1001 / CALL-1 again. SQLite hands out max(id)+1, so the
+        # wipe above already did it; Postgres keeps a sequence that has to be told.
+        if conn.engine.dialect.name != "sqlite":
             for table in ("cases", "calls", "transcript", "case_events"):
                 conn.execute(text(f"ALTER SEQUENCE {table}_id_seq RESTART WITH 1"))
 
