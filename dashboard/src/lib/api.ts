@@ -138,7 +138,8 @@ export type CaseEvent = {
   field: "created" | "status" | "note" | "issue_type" | "description" | "call_linked" | "looked_up";
   old_value: string | null;
   new_value: string | null;
-  source: "voice" | "staff";
+  source: "voice" | "staff"; // which system wrote it
+  actor: string | null; // which person, from X-Actor; null on a voice call and on older rows
   ts: string;
 };
 

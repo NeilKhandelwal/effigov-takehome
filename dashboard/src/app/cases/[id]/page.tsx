@@ -78,6 +78,9 @@ export default function CaseDetailPage() {
 
   const noteEvents = events.filter((e) => e.field === "note"); // events, not case.notes: they carry ts + source
 
+  // source says which system wrote the row, actor which person; a voice call names nobody
+  const who = (e: CaseEvent) => (e.actor ? `${e.source} · ${e.actor}` : e.source);
+
   // status/issue_type are enums worth prettifying; description and notes are free text
   const val = (e: CaseEvent, v: string | null) =>
     !v ? "—" : e.field === "status" || e.field === "issue_type" ? humanize(v) : v;
@@ -141,7 +144,7 @@ export default function CaseDetailPage() {
                           e.source === "voice" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-slate-100 text-slate-600 ring-slate-200"
                         }`}
                       >
-                        {e.source}
+                        {who(e)}
                       </span>
                     </div>
                     <p className="text-sm whitespace-pre-wrap break-words">{e.new_value}</p>
@@ -255,7 +258,7 @@ export default function CaseDetailPage() {
                         e.source === "voice" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-slate-100 text-slate-600 ring-slate-200"
                       }`}
                     >
-                      {e.source}
+                      {who(e)}
                     </span>
                     <span className="min-w-0 break-words">
                       {e.field === "created" ? (
