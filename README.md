@@ -23,7 +23,7 @@ change with who made it (`staff` vs `voice`). A caller who asks for a person fla
  mic ──► agent/  (LiveKit Agents, dev mode)            dashboard/ (Next.js) ◄── Chrome
             │  httpx: POST /cases, /calls, /calls/{id}/transcript      ▲  fetch + WS /ws
             ▼                                                          │
-         backend/  (FastAPI + stdlib sqlite3)  ──── broadcast {type,id} ┘
+         backend/  (FastAPI + SQLAlchemy Core)    ──── broadcast {type,id} ┘
          tables: cases · calls · call_cases · transcript · case_events
 ```
 
@@ -45,14 +45,15 @@ call; if the backend is down at call start, the call still works, just without t
 
 ## Data model
 
-**Cases** (`cases`). One service request. The row id is an `AUTOINCREMENT` integer; the public id
-is `"C-" + (1000 + rowid)`, so the first case is `C-1001` and the agent has a short number to read
+**Cases** (`cases`). One service request. The row id is an integer primary key; the public id
+is `"C-" + (1000 + id)`, derived in the API layer, so the first case is `C-1001` and the agent has a short number to read
 aloud. `phone` is stored digits-only. `issue_type` is one of `missed_pickup`, `pothole`,
 `streetlight`, `water`, `animal`, `other` — and is **null until classified**, because the agent
 opens the case before it knows the type. `status` is `open | in_progress | resolved` and only staff
-set it. `notes` is a single free-text field that a PATCH replaces wholesale.
+set it. `notes` is not a column: it is derived from the case's `note` events, joined oldest first
+(see **Notes** below).
 
-**Calls** (`calls`). One voice session, public id `"CALL-" + rowid`. A call is not a case: one case
+**Calls** (`calls`). One voice session, public id `"CALL-" + id`. A call is not a case: one case
 collects many calls (the report, then the follow-up), and a lookup-only call should not create a
 junk case. A call carries `status` (`active | needs_person | ended`), `room` (the LiveKit room, so
 the browser page can find its own call), `summary` (written by the agent at hang-up), and
@@ -67,9 +68,26 @@ transient failure cannot duplicate anything.
 
 **Audit** (`case_events`). Append-only. `POST /cases` writes a `created` row; a PATCH writes one row
 per field that actually changed (re-sending the same value writes nothing); linking writes
-`call_linked`; a successful code lookup writes `looked_up`. `source` comes from the `X-Source`
+`call_linked`; a successful code lookup writes `looked_up`; a note writes `note`. `source` comes from the `X-Source`
 header — `staff` by default, `voice` from the agent, `seed` for the seeded rows. Timestamps are
 second-resolution, so ordering relies on `ORDER BY id`.
+
+**Notes.** A note is a `case_events` row with `field="note"` and the text in `new_value`, so it has
+its own source and timestamp. `POST /cases/{id}/notes {text}` appends one — a single write, so two
+people adding a note in the same second no longer overwrite each other. `Case.notes` is still in the
+JSON, derived from those rows; `PATCH /cases/{id}` refuses `notes` with a 422 rather than ignoring it.
+
+**Storage.** `DATABASE_URL` picks the database — unset means a SQLite file at `backend/cases.db`, so
+a local clone needs no infrastructure; compose and CI run `postgresql+psycopg://…` against
+`postgres:16`. The schema lives in Alembic migrations under `backend/migrations/`, applied by
+`alembic upgrade head` at app startup and in the Docker entrypoint; nothing else creates or alters a
+table. Foreign keys are on (SQLite gets `PRAGMA foreign_keys=ON` per connection), so the database
+itself rejects a call linked to a case that does not exist. Every row also carries a `city_id`,
+defaulted to the one seeded city — internal for now, and not in any response.
+
+**Reading only what changed.** `GET /cases?since=<ISO>` and `GET /calls?since=<ISO>` return rows
+written strictly after the cursor; calls carry an `updated_at` that every write to the call bumps,
+transcript lines included.
 
 **Lookup codes.** Three words drawn from a 300-word list (27 million combinations), generated on
 case creation and checked for collisions against the table. `POST /cases` is the only response that
@@ -88,7 +106,7 @@ LiveKit Cloud project for the `LIVEKIT_*` keys (Settings → Keys). Without the 
 except the voice call works.
 
 ```sh
-# 1. backend (http://localhost:8000, SQLite file backend/cases.db — override with CASES_DB=<path>)
+# 1. backend (http://localhost:8000, SQLite file backend/cases.db — override with DATABASE_URL=<url>)
 cd backend && cp .env.example .env    # LIVEKIT_* (needed only for the browser call's /token)
 uv sync && uv run python -m scripts.seed && uv run uvicorn app.main:app --reload --port 8000
 # 2. dashboard (http://localhost:3000 — open it at localhost, not 127.0.0.1, for CORS; backend URL from NEXT_PUBLIC_API_URL, default http://localhost:8000)
@@ -98,7 +116,7 @@ cd agent && cp .env.example .env      # LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_
 uv sync && uv run python src/agent.py download-files   # once: turn-detector / VAD models
 uv run python src/agent.py dev
 ```
-- Env vars: `NEXT_PUBLIC_API_URL` (dashboard → backend, default `http://localhost:8000`) and `CORS_ORIGINS` (backend, comma-separated, default `http://localhost:3000`) — both listed in the matching `.env.example`.
+- Env vars: `NEXT_PUBLIC_API_URL` (dashboard → backend, default `http://localhost:8000`), `CORS_ORIGINS` (backend, comma-separated, default `http://localhost:3000`) — both listed in the matching `.env.example` — and `DATABASE_URL` (backend; unset means the SQLite file, `postgresql+psycopg://…` for Postgres). The old `CASES_DB=<path>` still works as a SQLite-only alias and prints a deprecation line. Migrations run themselves at startup; `uv run alembic upgrade head` applies them by hand.
 - Staff login: set `AUTH_SECRET` (`openssl rand -base64 32`) and `STAFF_USERS="name:hash,..."` in `dashboard/.env.local`, where each hash comes from `cd dashboard && npm run hash-password -- <password>`. **Dev-only shortcut:** leave `STAFF_USERS` unset and dashboard auth is disabled entirely — every route is open, the nav shows nobody, and the server logs one warning at startup — so a fresh clone and `docker compose up` still work with nothing configured. Never deploy with it unset.
 
 Then open http://localhost:3000/call and press **Start call** (Chrome asks for the mic once).
@@ -114,16 +132,16 @@ tables and reseeds the 3 sample cases, printing each case's lookup code.
 Local dev only (the three-terminal path above is still the primary one). Needs Docker Desktop / Engine with the Compose plugin.
 
 ```sh
-docker compose up --build            # backend :8000 (seeded on first start) + dashboard :3000
+docker compose up --build            # postgres + backend :8000 (migrated and seeded) + dashboard :3000
 docker compose --profile voice up    # ...plus the LiveKit agent worker (needs agent/.env)
-docker compose down                  # stop; add -v to also drop the seeded DB volume
+docker compose down                  # stop; add -v to also drop the postgres volume
 ```
 
-The backend's SQLite file lives on the named volume `cases-db` at `/data/cases.db`, seeded with the 3 sample cases the first time the volume is empty; restarts leave it alone, `down -v` resets it. The dashboard runs `next dev` with `dashboard/` bind-mounted, so edits hot-reload. The agent service reads `agent/.env` (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) and talks to the backend over the compose network.
+Compose runs `postgres:16` on the named volume `pg-data`; the backend waits for it to be healthy, applies the migrations, and seeds the 3 sample cases only when the `cases` table is empty, so restarts leave data alone and `down -v` resets it. Outside compose the backend still defaults to SQLite and needs nothing running. The dashboard runs `next dev` with `dashboard/` bind-mounted, so edits hot-reload. The agent service reads `agent/.env` (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) and talks to the backend over the compose network.
 
 ### CI
 
-`.github/workflows/ci.yml` runs on every push to `main` and every PR: backend pytest, agent pytest (unit tests only -- the `eval` marker stays deselected and no LiveKit keys are needed), and dashboard `npm run lint` + `npm run build`, in parallel.
+`.github/workflows/ci.yml` runs on every push to `main` and every PR: backend pytest twice — once on SQLite and once against a `postgres:16` service container, the same suite both times — agent pytest (unit tests only -- the `eval` marker stays deselected and no LiveKit keys are needed), and dashboard `npm run lint` + `npm run build`, in parallel.
 
 `.github/workflows/evals.yml` runs the LLM scenario evals (`pytest -m eval`) on a nightly cron and on manual dispatch. It needs three repository secrets -- **`LIVEKIT_URL`**, **`LIVEKIT_API_KEY`**, **`LIVEKIT_API_SECRET`** -- and skips with a notice if they are not set.
 
@@ -131,8 +149,9 @@ The backend's SQLite file lives on the named volume `cases-db` at `/data/cases.d
 
 Two kinds, and only one of them costs money.
 
-**Unit** — offline, no keys, no LLM. `cd backend && uv run pytest` (34 tests over the endpoints, the
-audit log, call/case linking, and code lookup) and `cd agent && uv run pytest` (12 tests over the
+**Unit** — offline, no keys, no LLM. `cd backend && uv run pytest` (53 tests over the endpoints, the
+audit log, call/case linking, code lookup, notes-as-events, the `since` cursor, and the migration and
+foreign keys themselves; set `DATABASE_URL` to run the identical suite against Postgres) and `cd agent && uv run pytest` (12 tests over the
 agent's pure helpers — phone validation, code normalization, the filed/second-case gates, summary
 assembly). These are what CI runs.
 
@@ -157,12 +176,13 @@ every payload, is in [docs/CONTRACT.md](docs/CONTRACT.md).
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/cases` | body `{name, phone, issue_type?, description}`; `issue_type` is null until classified. The only response that carries `lookup_code` |
-| `GET` | `/cases[?phone=]` | newest first; `phone` matches digits only |
-| `GET` / `PATCH` | `/cases/{id}` | PATCH any of `status`, `notes`, `issue_type`, `description`; header `X-Source` (`staff` default, agent sends `voice`) |
+| `GET` | `/cases[?phone=&since=]` | newest first; `phone` matches digits only; `since` returns only rows updated after an ISO timestamp |
+| `GET` / `PATCH` | `/cases/{id}` | PATCH any of `status`, `issue_type`, `description`; header `X-Source` (`staff` default, agent sends `voice`). `notes` is refused with a 422 — it moved to the row below |
+| `POST` | `/cases/{id}/notes` | body `{text}` → 201 the `note` event; appends one note, `X-Source` as elsewhere |
 | `GET` | `/cases/lookup?code=` | three spoken words (`blue river maple`, `Blue and River dash Maple`) → the case; 404 `no case for that code` for unknown *and* malformed; 5th wrong code on one `X-Call-Id` → 429 |
 | `GET` | `/cases/{id}/events` | audit log, oldest first |
 | `GET` | `/cases/{id}/calls` | that case's calls with transcripts |
-| `POST` / `GET` | `/calls[?status=&room=]` | a call record per voice session |
+| `POST` / `GET` | `/calls[?status=&room=&since=]` | a call record per voice session; `since` as on `/cases`, against the call's `updated_at` |
 | `GET` / `PATCH` | `/calls/{id}` | PATCH `status` (`active` \| `needs_person` \| `ended`), `case_id`, `summary`, `transfer_reason`; a call reads back `case_id` (the case being worked now) and `case_ids` (every case it touched, in link order) |
 | `POST` | `/calls/{id}/cases` | body `{case_id, how}` (`created` \| `looked_up`); links the case and makes it the current one. 201 new link, 200 already linked, 404 unknown call or case. One `call_linked` event per (case, call) |
 | `POST` | `/calls/{id}/transcript` | `{role: user\|agent, text}` |

@@ -27,24 +27,33 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
 
 ## Phase 2 — Data
 
-- [ ] **Postgres + Alembic** — replace SQLite and the `ALTER TABLE` calls in
+- [x] **Postgres + Alembic** — replace SQLite and the `ALTER TABLE` calls in
       `db.init_db()` with real migrations.
       *Done when:* schema changes ship as reviewable migrations and no startup path
       mutates the schema.
+      SQLAlchemy Core + Alembic; `DATABASE_URL` picks the engine, Postgres in compose and
+      CI, SQLite by default so a local clone still needs no infra.
 - [ ] **`city_id` on cases, calls, and case_events** — one deployment, many cities.
       *Done when:* every read is scoped by city and a query without a city scope fails
       in tests.
-- [ ] **Row-id foreign keys** — store integer keys, derive `C-1001` / `CALL-7` in the API
+      Column and the seeded city exist on all three tables; scoping the reads is what is
+      left, and it is a query change now rather than a migration of live data.
+- [x] **Row-id foreign keys** — store integer keys, derive `C-1001` / `CALL-7` in the API
       layer, and turn `PRAGMA foreign_keys` (or its Postgres equivalent) on.
       *Done when:* the database rejects a call linked to a case that does not exist,
       instead of `main.py` doing it.
 - [ ] **Notes as `case_events` rows** — drop the `notes` column; a note is an event with
       its own source and timestamp.
       *Done when:* `add_note` is a single POST and the GET-then-PATCH race is gone.
+      Backend done: the column is gone, `POST /cases/{id}/notes` is the single write, and
+      `PATCH` refuses `notes` with a 422. The agent's `add_note` and the dashboard's notes
+      textarea still send the old PATCH; moving them is the follow-up PR.
 - [ ] **`since` cursor on list endpoints** — `GET /cases?since=` and `GET /calls?since=`
       return only what changed.
       *Done when:* a refetch after a long disconnect costs one small response instead of
       the whole table.
+      Backend done on both lists; the dashboard still refetches everything on reconnect, so
+      the saving is not real yet. Follow-up PR.
 
 ## Phase 3 — Access
 

@@ -12,7 +12,8 @@ Backend on http://localhost:8000. JSON everywhere. Errors: 404 {"detail": "..."}
                                // null until classified — the agent opens the case before it knows the type
   "description": "Trash not collected on Elm St Tuesday",
   "status": "open",            // open | in_progress | resolved
-  "notes": "",                 // free text, appended to by agent/staff
+  "notes": "",                 // DERIVED, not a column: the case's note events joined by "\n",
+                               // oldest first (see "## Data layer")
   "created_at": "2026-08-28T20:01:02Z",
   "updated_at": "2026-08-28T20:01:02Z"
 }
@@ -21,19 +22,20 @@ Backend on http://localhost:8000. JSON everywhere. Errors: 404 {"detail": "..."}
 ## Endpoints
 - `POST /cases` body {name, phone, description, optional issue_type} -> 201 Case (status=open, notes="", issue_type=null if omitted)
 - `GET /cases` -> [Case], newest first. Optional `?phone=` (digits) filters exact match.
+  Optional `?since=<ISO>` (see "## Data layer").
 - `GET /cases/{id}` -> Case | 404
-- `PATCH /cases/{id}` body any of {status, notes, issue_type, description} -> Case | 404
-  - `notes` REPLACES. To append, client GETs then PATCHes (agent does this in add_note).
+- `PATCH /cases/{id}` body any of {status, issue_type, description} -> Case | 404
+  - `notes` is NOT accepted: 422, naming `POST /cases/{id}/notes` (see "## Data layer").
 - `GET /health` -> {"ok": true}
 
 ## Stretch (locked 13:12) — a call is not a case
 ```json
 Call: {"id": "CALL-7", "case_id": null | "C-1001", "status": "active"|"ended",
-       "started_at": "...Z", "ended_at": null | "...Z"}
+       "started_at": "...Z", "ended_at": null | "...Z", "updated_at": "...Z"}
 TranscriptLine: {"id": 12, "call_id": "CALL-7", "role": "user"|"agent", "text": "...", "ts": "...Z"}
 ```
 - `POST /calls` body {} -> 201 Call (status=active). id = "CALL-" + rowid (no offset).
-- `GET /calls` -> [Call] newest first; `?status=active` filters.
+- `GET /calls` -> [Call] newest first; `?status=active` filters; `?since=<ISO>` (see "## Data layer").
 - `GET /calls/{id}` -> Call + `"transcript": [TranscriptLine]` | 404
 - `PATCH /calls/{id}` body any of {status, case_id} -> Call | 404. status=ended sets ended_at.
 - `POST /calls/{id}/transcript` body {role, text} -> 201 TranscriptLine | 404
@@ -107,3 +109,29 @@ Console mode keeps working for local testing.
 - Agent tool `end_call()` -> waits for the goodbye to finish playing, 2.5 s grace, then deletes the LiveKit
   room (`DeleteRoomRequest`). No backend write: the browser disconnect drives the normal shutdown path
   (summary, then PATCH status=ended), so the call is marked ended exactly once. Never used after a transfer.
+
+## Data layer (added 2026-08-30) — migrated, foreign-keyed, Postgres or SQLite
+The endpoints and every payload above are unchanged except where this section says otherwise.
+
+- `DATABASE_URL` picks the database. Unset -> `sqlite:///backend/cases.db`, so the local
+  three-terminal path still needs no infra. Compose and CI use
+  `postgresql+psycopg://…`. `CASES_DB=<path>` still works as a SQLite-only alias and logs a
+  deprecation line. Alembic owns the schema: `alembic upgrade head` runs at app startup and in
+  the Docker entrypoint, and nothing else creates or alters a table.
+- **Ids.** Rows store integers with real foreign keys; `C-{1000+id}` and `CALL-{id}` are derived
+  in the API layer. Every endpoint takes and returns the public form exactly as before, and a
+  malformed public id is still a 404, never a 500. The database now rejects a call linked to a
+  missing case; the API still checks first, so callers get the same 404 and the same wording.
+- **Notes are events.** The `notes` column is gone. A note is a `case_events` row with
+  `field="note"`, `new_value=<text>`, and its own `source` and `ts`.
+  - `POST /cases/{id}/notes` body `{text}` -> 201 CaseEvent | 404. `source` from `X-Source` as
+    everywhere else. Broadcasts `{"type": "case", "id": ...}` and bumps the case's `updated_at`.
+  - `Case.notes` stays in the JSON, derived: those rows joined by `"\n"`, oldest first.
+  - `PATCH /cases/{id}` with `notes` -> 422. Ignoring it would swallow a staff edit.
+- **`since` cursor.** `GET /cases?since=<ISO>` and `GET /calls?since=<ISO>` return only rows
+  written strictly after the cursor — cases by `updated_at`, calls by `updated_at`, which is new
+  on calls and bumped by every write to the call, transcript lines included. Omitted still means
+  everything. Timestamps are the same `...Z` strings, compared as strings.
+- **`city_id`** is on `cases`, `calls` and `case_events`, defaulted to the one seeded city
+  (`cities` row 1, "Demo City"). It is internal for now: not in any response body, not a filter.
+  Scoping reads by city is Phase 2's next item.

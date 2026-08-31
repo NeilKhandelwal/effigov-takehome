@@ -8,9 +8,10 @@ case in a Next.js dashboard, live. Read [README.md](README.md) first — it has 
 model and the API table.
 
 ## Layout
-- `backend/` — FastAPI + stdlib `sqlite3`. `app/main.py` is every endpoint, `app/db.py`
-  the schema and id helpers, `app/models.py` the Pydantic types, `app/codes.py` +
-  `app/words.py` the lookup codes. `scripts/seed.py`, `scripts/reset_demo.py`.
+- `backend/` — FastAPI + SQLAlchemy Core (no ORM). `app/main.py` is every endpoint,
+  `app/db.py` the tables, the engine and the public-id helpers, `migrations/` the Alembic
+  schema, `app/models.py` the Pydantic types, `app/codes.py` + `app/words.py` the lookup
+  codes. `scripts/seed.py`, `scripts/reset_demo.py`.
 - `agent/` — LiveKit Agents worker. `src/agent.py` is the prompt, the six function tools,
   and the session wiring. `tests/` has unit tests plus `test_scenarios.py` (evals).
 - `dashboard/` — Next.js App Router. `src/lib/api.ts` is the whole client (types, fetch
@@ -19,7 +20,9 @@ model and the API table.
 
 ## Run and test
 - Backend: `cd backend && uv sync && uv run uvicorn app.main:app --reload --port 8000`;
-  tests `uv run pytest`. `CASES_DB=<path>` overrides the SQLite file.
+  tests `uv run pytest`. `DATABASE_URL` picks the database — unset means the SQLite file
+  `backend/cases.db`, `postgresql+psycopg://…` is what compose and CI run. Migrations apply
+  themselves at startup; `uv run alembic upgrade head` does it by hand.
 - Agent: `cd agent && uv sync && uv run python src/agent.py dev` (or `console`);
   tests `uv run pytest`. Evals: `uv run pytest -m eval` — live LLM calls, needs
   `LIVEKIT_*` in `agent/.env`, deselected by default. Never let CI run them unmetered.
