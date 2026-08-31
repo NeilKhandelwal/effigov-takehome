@@ -152,11 +152,37 @@ def test_cases_since_returns_only_what_changed(client, monkeypatch):
     client.post("/cases", json=BODY)
     monkeypatch.setattr(main, "now", lambda: "2030-01-01T00:05:00Z")
     client.patch("/cases/C-1001", json={"status": "resolved"})
-    since = {"since": "2030-01-01T00:00:00Z"}
-    assert [c["id"] for c in client.get("/cases", params=since).json()] == ["C-1001"]
-    # strictly after: a cursor equal to the newest row must not re-send that row
-    assert client.get("/cases", params={"since": "2030-01-01T00:05:00Z"}).json() == []
+    assert [c["id"] for c in client.get("/cases", params={"since": "2030-01-01T00:01:00Z"}).json()] == ["C-1001"]
     assert len(client.get("/cases").json()) == 2  # omitted still means everything
+
+
+def test_since_is_inclusive_so_a_write_in_the_cursor_second_is_never_lost(client, monkeypatch):
+    """The cursor a client stores is the newest updated_at it has seen, and timestamps are
+    only second-resolution. With a strict >, anything else written during that same second is
+    dropped from that refetch and from every later one — the row is gone for good. Inclusive
+    costs a duplicate the client was already going to get from the WS frame."""
+    from app import main
+
+    monkeypatch.setattr(main, "now", lambda: "2030-01-01T00:00:00Z")
+    client.post("/cases", json=BODY)
+    cursor = client.get("/cases").json()[0]["updated_at"]  # what a client would store
+    client.post("/cases", json=BODY)  # same second as the cursor
+    ids = [c["id"] for c in client.get("/cases", params={"since": cursor}).json()]
+    assert ids == ["C-1002", "C-1001"]  # the tie is returned, not silently dropped
+
+    client.post("/calls")
+    call_cursor = client.get("/calls").json()[0]["updated_at"]
+    client.post("/calls")
+    assert [c["id"] for c in client.get("/calls", params={"since": call_cursor}).json()] == ["CALL-2", "CALL-1"]
+
+
+def test_an_unparseable_since_is_422_not_an_empty_list(client):
+    """A malformed cursor used to match no rows, which reads exactly like "nothing changed".
+    A client would sit there refetching emptiness and never know."""
+    client.post("/cases", json=BODY)
+    for bad in ("yesterday", "2030-13-45", "", "1756000000"):
+        assert client.get("/cases", params={"since": bad}).status_code == 422, bad
+        assert client.get("/calls", params={"since": bad}).status_code == 422, bad
 
 
 def test_calls_since_follows_every_write_to_the_call(client, monkeypatch):
@@ -169,8 +195,8 @@ def test_calls_since_follows_every_write_to_the_call(client, monkeypatch):
     client.post("/calls")
     monkeypatch.setattr(main, "now", lambda: "2030-01-01T00:05:00Z")
     client.patch("/calls/CALL-1", json={"status": "ended"})
-    assert [c["id"] for c in client.get("/calls", params={"since": "2030-01-01T00:00:00Z"}).json()] == ["CALL-1"]
+    assert [c["id"] for c in client.get("/calls", params={"since": "2030-01-01T00:01:00Z"}).json()] == ["CALL-1"]
     monkeypatch.setattr(main, "now", lambda: "2030-01-01T00:09:00Z")
     client.post("/calls/CALL-2/transcript", json={"role": "user", "text": "hi"})
-    assert [c["id"] for c in client.get("/calls", params={"since": "2030-01-01T00:05:00Z"}).json()] == ["CALL-2"]
+    assert [c["id"] for c in client.get("/calls", params={"since": "2030-01-01T00:06:00Z"}).json()] == ["CALL-2"]
     assert len(client.get("/calls").json()) == 2  # omitted still means everything

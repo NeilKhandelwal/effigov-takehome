@@ -76,6 +76,23 @@ def digits(phone: str) -> str:
     return re.sub(r"\D", "", phone)
 
 
+def parse_since(since: str | None) -> str | None:
+    """Validate ?since= and hand it back as the string the columns are compared against.
+
+    It is only ever compared as a string, but it still has to BE a timestamp: an unparseable
+    cursor used to match nothing at all, which a client reads as "nothing has changed" —
+    forever, and silently.
+    """
+    if since is None:
+        return None
+    try:
+        datetime.fromisoformat(since)
+    except ValueError:
+        raise HTTPException(status_code=422,
+                            detail="since must be an ISO-8601 timestamp, e.g. 2026-08-30T12:00:00Z")
+    return since
+
+
 def notes_of(conn, case_pks: list[int]) -> dict[int, str]:
     """The notes each case shows, oldest first. There is no notes column: a note is a
     case_events row with field="note", so the JSON field is joined back together here."""
@@ -208,9 +225,12 @@ def list_cases(phone: str | None = None, since: str | None = None) -> list[Case]
     q = select(db.cases)
     if phone is not None:
         q = q.where(db.cases.c.phone == digits(phone))
+    since = parse_since(since)
     if since is not None:
-        # timestamps are ISO-8601 Z strings, so "later than" is a plain string comparison
-        q = q.where(db.cases.c.updated_at > since)
+        # inclusive, and ISO-8601 Z strings compare as strings. Timestamps are only
+        # second-resolution: a strict > drops every row written in the cursor's own second,
+        # permanently. A duplicate row costs a client nothing — it refetches on WS frames anyway.
+        q = q.where(db.cases.c.updated_at >= since)
     with db.connect() as conn:
         return to_cases(conn, conn.execute(q.order_by(db.cases.c.id.desc())).fetchall())
 
@@ -313,8 +333,9 @@ def list_calls(status: CallStatus | None = None, room: str | None = None,
     for column, value in (("status", status), ("room", room)):
         if value is not None:
             q = q.where(db.calls.c[column] == value)
+    since = parse_since(since)
     if since is not None:
-        q = q.where(db.calls.c.updated_at > since)
+        q = q.where(db.calls.c.updated_at >= since)  # inclusive, as on /cases
     with db.connect() as conn:
         rows = conn.execute(q.order_by(db.calls.c.id.desc())).fetchall()
         return [to_call(conn, r) for r in rows]
