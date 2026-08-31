@@ -16,6 +16,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+      # first boot initialises the data directory; without the grace the first probes fail
+      # and the backend can be started against a postgres that is not listening yet
+      start_period: 10s
 
   backend:
     build: ./backend

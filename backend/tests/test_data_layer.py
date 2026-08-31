@@ -220,3 +220,18 @@ def test_calls_since_follows_every_write_to_the_call(client, monkeypatch):
     client.post("/calls/CALL-2/transcript", json={"role": "user", "text": "hi"})
     assert [c["id"] for c in client.get("/calls", params={"since": "2030-01-01T00:06:00Z"}).json()] == ["CALL-2"]
     assert len(client.get("/calls").json()) == 2  # omitted still means everything
+
+
+def test_two_cases_cannot_share_a_lookup_code(client):
+    """The code is the only thing standing between a caller and someone else's case, so a
+    duplicate is a disclosure. codes.new_code() retries on collision, but that check and the
+    insert are not atomic — the unique index is the backstop the retry loop cannot be."""
+    from sqlalchemy import update
+
+    client.post("/cases", json=BODY)
+    client.post("/cases", json=BODY)
+    with db.connect() as conn:
+        code = conn.execute(select(db.cases.c.lookup_code).where(db.cases.c.id == 1)).scalar()
+    with pytest.raises(IntegrityError):
+        with db.connect() as conn:
+            conn.execute(update(db.cases).where(db.cases.c.id == 2).values(lookup_code=code))

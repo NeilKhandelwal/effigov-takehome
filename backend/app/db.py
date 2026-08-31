@@ -58,7 +58,8 @@ cases = Table(
     Column("updated_at", String, nullable=False),
     Index("cases_phone", "phone"),
     Index("cases_status", "status"),
-    Index("cases_lookup_code", "lookup_code"),
+    # unique: the code is what proves a caller owns the case (migration 0002)
+    Index("cases_lookup_code", "lookup_code", unique=True),
 )
 
 calls = Table(
