@@ -42,12 +42,12 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
       layer, and turn `PRAGMA foreign_keys` (or its Postgres equivalent) on.
       *Done when:* the database rejects a call linked to a case that does not exist,
       instead of `main.py` doing it.
-- [ ] **Notes as `case_events` rows** — drop the `notes` column; a note is an event with
+- [x] **Notes as `case_events` rows** — drop the `notes` column; a note is an event with
       its own source and timestamp.
       *Done when:* `add_note` is a single POST and the GET-then-PATCH race is gone.
-      Backend done: the column is gone, `POST /cases/{id}/notes` is the single write, and
-      `PATCH` refuses `notes` with a 422. The agent's `add_note` and the dashboard's notes
-      textarea still send the old PATCH; moving them is the follow-up PR.
+      The column is gone, `POST /cases/{id}/notes` is the single write, and `PATCH` refuses
+      `notes` with a 422. Both consumers are on it: `add_note` is one POST, and the
+      dashboard's textarea is now an append-only list of notes with a time and a source.
 - [ ] **`since` cursor on list endpoints** — `GET /cases?since=` and `GET /calls?since=`
       return only what changed.
       *Done when:* a refetch after a long disconnect costs one small response instead of

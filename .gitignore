@@ -9,3 +9,6 @@ node_modules/
 .DS_Store
 agent/console.log
 agent/worker.log
+# written into dashboard/ by the Next 16 dev server, not by us
+dashboard/AGENTS.md
+dashboard/CLAUDE.md
