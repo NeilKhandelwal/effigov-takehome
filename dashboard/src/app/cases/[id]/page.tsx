@@ -12,6 +12,7 @@ import {
   STATUS_COLOR,
   Status,
   Tracked,
+  addNote,
   duration,
   flash,
   getCase,
@@ -32,16 +33,14 @@ export default function CaseDetailPage() {
   const [calls, setCalls] = useState<CallWithTranscript[]>([]);
   const [events, setEvents] = useState<CaseEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
-  const [dirty, setDirty] = useState(false); // true while the user has unsaved edits
+  const [note, setNote] = useState(""); // the note being typed; notes themselves are events
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     getCase(id)
       .then((data) => {
         setCase((prev) => track(prev, data));
         setError(null);
-        // don't clobber the textarea while the user is editing it
-        if (!dirty) setNotes(data.notes);
       })
       .catch((e: Error) => setError(e.message));
     getCaseCalls(id)
@@ -50,12 +49,12 @@ export default function CaseDetailPage() {
     getCaseEvents(id)
       .then(setEvents)
       .catch(() => setEvents([]));
-  }, [id, dirty]);
+  }, [id]);
 
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
 
-  const update = (body: Partial<Case>) =>
+  const update = (body: Partial<Pick<Case, "status" | "issue_type" | "description">>) =>
     patchCase(id, body)
       .then((data) => {
         setCase((prev) => track(prev, data));
@@ -64,12 +63,22 @@ export default function CaseDetailPage() {
       })
       .catch((e: Error) => setError(e.message));
 
-  const saveNotes = async () => {
-    const data = await update({ notes });
-    if (data) setDirty(false);
+  const submitNote = async () => {
+    const text = note.trim();
+    if (!text) return;
+    try {
+      await addNote(id, text);
+      setNote(""); // it is stored; the refetch below is what renders it
+      setNoteError(null);
+      load();
+    } catch (e) {
+      setNoteError((e as Error).message); // keep what was typed so it can be retried
+    }
   };
 
-  // status/issue_type are enums worth prettifying; notes/description are free text
+  const noteEvents = events.filter((e) => e.field === "note"); // events, not case.notes: they carry ts + source
+
+  // status/issue_type are enums worth prettifying; description and notes are free text
   const val = (e: CaseEvent, v: string | null) =>
     !v ? "—" : e.field === "status" || e.field === "issue_type" ? humanize(v) : v;
   const cs = c.data;
@@ -120,28 +129,44 @@ export default function CaseDetailPage() {
             </section>
 
             <section className={card}>
-              <h2 className={h2}>Notes</h2>
-              <textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => {
-                  setNotes(e.target.value);
-                  setDirty(true);
-                }}
-                rows={5}
-                placeholder="Internal notes — the agent's add_note tool appends here too."
-                className={`w-full rounded-md border border-slate-300 p-2 text-sm ${flash(c, "notes")}`}
-              />
-              <div className="flex items-center gap-3 mt-2">
+              <h2 className={h2}>Notes ({noteEvents.length})</h2>
+              {noteEvents.length === 0 && <p className="text-slate-500 text-sm mb-3">No notes yet.</p>}
+              <ol className="space-y-2 mb-3">
+                {noteEvents.map((e) => (
+                  <li key={e.id} className="border-l-2 border-slate-200 pl-3">
+                    <div className="flex items-center gap-2 text-xs text-slate-500 mb-0.5">
+                      <span className="font-mono">{new Date(e.ts).toLocaleString()}</span>
+                      <span
+                        className={`px-1.5 rounded-full ring-1 ${
+                          e.source === "voice" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-slate-100 text-slate-600 ring-slate-200"
+                        }`}
+                      >
+                        {e.source}
+                      </span>
+                    </div>
+                    <p className="text-sm whitespace-pre-wrap break-words">{e.new_value}</p>
+                  </li>
+                ))}
+              </ol>
+              {/* append-only: a note is a row of its own, so there is nothing to edit or save */}
+              <div className="flex items-center gap-2">
+                <input
+                  id="note"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submitNote()}
+                  placeholder="Add a note — the agent's add_note tool appends here too."
+                  className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                />
                 <button
-                  onClick={saveNotes}
-                  disabled={!dirty}
-                  className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40"
+                  onClick={submitNote}
+                  disabled={!note.trim()}
+                  className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40 shrink-0"
                 >
-                  Save notes
+                  Add note
                 </button>
-                {dirty && <span className="text-xs text-amber-700">Unsaved changes</span>}
               </div>
+              {noteError && <p className="text-red-700 text-xs mt-2">{noteError}</p>}
             </section>
 
             <section className={card}>
@@ -239,6 +264,9 @@ export default function CaseDetailPage() {
                         <>Linked {e.new_value}</>
                       ) : e.field === "looked_up" ? (
                         <>Looked up by {e.source}</>
+                      ) : e.field === "note" ? (
+                        // a note has no old value; a strikethrough diff would be nonsense
+                        <><span className="text-slate-500">Note:</span> {e.new_value}</>
                       ) : (
                         <>
                           <span className="text-slate-500">{humanize(e.field)}:</span>{" "}

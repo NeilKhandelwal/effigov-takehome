@@ -366,11 +366,11 @@ class Assistant(Agent):
             return "No case on this call yet; ask for the three-word lookup code and call lookup_case."
         try:
             async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
-                r = await client.get(f"{BACKEND}/cases/{self.current_case}")
-                r.raise_for_status()
-                # PATCH notes replaces the field, so append client-side (per CONTRACT.md)
-                notes = (r.json()["notes"] + "\n" + note).strip()
-                r = await client.patch(f"{BACKEND}/cases/{self.current_case}", json={"notes": notes})
+                # one POST, no read-modify-write: two writers in the same second both keep
+                # their note, and the audit log records the note rather than a rewrite
+                r = await client.post(
+                    f"{BACKEND}/cases/{self.current_case}/notes", json={"text": note}
+                )
                 r.raise_for_status()
                 return f"Note added to case {self.current_case}"
         except Exception:

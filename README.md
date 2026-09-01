@@ -211,9 +211,6 @@ before it is built.
 
 ## Known limitations
 
-- Notes are a mutable blob beside an append-only event log — two storage models for one history.
-  The agent appends client-side (GET then PATCH), so two simultaneous note-writers would race. A
-  note should be a `case_events` row (Phase 2).
 - Lookup codes are stored in plaintext, so anyone with database or dashboard access can read one. A
   caller who has lost their code has no self-service path: staff verify them another way and read it
   out of the database.
