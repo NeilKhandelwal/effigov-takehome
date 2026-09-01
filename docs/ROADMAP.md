@@ -61,9 +61,12 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
       are provider keys.
       *Done when:* every dashboard route redirects an unauthenticated visitor to a login
       page.
-- [ ] **Audit source is the authenticated user** — `X-Source: staff` becomes the actual
+- [x] **Audit source is the authenticated user** — `X-Source: staff` becomes the actual
       staff identity; the agent keeps `voice`.
       *Done when:* a case's history names who made each change, not just which system.
+      Done as a second field, not a replacement: `source` still says which system, `actor`
+      says which person. The dashboard sends `X-Actor` from the session; the backend trusts
+      it until backend auth lands.
 - [ ] **Nightly eval run in CI** — the scenario suite on a schedule, with a hard cap on
       LLM spend per run.
       *Done when:* a prompt regression shows up as a failed nightly run and the cap stops

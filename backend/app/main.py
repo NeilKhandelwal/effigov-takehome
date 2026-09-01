@@ -76,6 +76,16 @@ def digits(phone: str) -> str:
     return re.sub(r"\D", "", phone)
 
 
+# 64 is a name, not a payload: the header is trusted (no backend auth yet), so what it
+# writes into the audit log is bounded here rather than at the column.
+ACTOR_MAX = 64
+
+
+def clean_actor(raw: str) -> str | None:
+    """The X-Actor header as it is stored: a trimmed name, or None when nobody is named."""
+    return raw.strip()[:ACTOR_MAX] or None
+
+
 def parse_since(since: str | None) -> str | None:
     """Validate ?since= and hand it back as the string the columns are compared against.
 
@@ -144,7 +154,8 @@ def touch_call(conn, call_pk: int, **values) -> None:
     conn.execute(update(db.calls).where(db.calls.c.id == call_pk).values(updated_at=now(), **values))
 
 
-def link_case(conn, call_pk: int, case_pk: int, how: str, source: str) -> bool:
+def link_case(conn, call_pk: int, case_pk: int, how: str, source: str,
+              actor: str | None) -> bool:
     """Record that this call touched this case. Returns True if the link is new.
 
     The join table is the truth; calls.current_case_id is only the cursor. One call_linked
@@ -158,7 +169,7 @@ def link_case(conn, call_pk: int, case_pk: int, how: str, source: str) -> bool:
         return False
     conn.execute(insert(db.call_cases).values(call_id=call_pk, case_id=case_pk, how=how,
                                               linked_at=now()))
-    log_event(conn, case_pk, "call_linked", None, db.call_id(call_pk), source)
+    log_event(conn, case_pk, "call_linked", None, db.call_id(call_pk), source, actor)
     return True
 
 
@@ -172,12 +183,14 @@ def with_transcript(conn, call: Call) -> CallDetail:
 
 
 def log_event(conn, case_pk: int, field: str, old: str | None, new: str | None,
-              source: str) -> CaseEvent:
+              source: str, actor: str | None) -> CaseEvent:
+    """The only writer of case_events. source says which system, actor says which person."""
     ts = now()
     cur = conn.execute(insert(db.case_events).values(
-        case_id=case_pk, field=field, old_value=old, new_value=new, source=source, ts=ts))
+        case_id=case_pk, field=field, old_value=old, new_value=new, source=source, actor=actor,
+        ts=ts))
     return CaseEvent(id=cur.inserted_primary_key[0], case_id=db.case_id(case_pk), field=field,
-                     old_value=old, new_value=new, source=source, ts=ts)
+                     old_value=old, new_value=new, source=source, actor=actor, ts=ts)
 
 
 @app.get("/health")
@@ -207,7 +220,8 @@ def token(identity: str) -> dict:
 
 # write endpoints are async so they can await broadcast() after the commit (the `with` exit)
 @app.post("/cases", status_code=201)
-async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> CaseCreated:
+async def create_case(body: CaseCreate, x_source: str = Header("staff"),
+                      x_actor: str = Header("")) -> CaseCreated:
     ts = now()
     with db.connect() as conn:
         code = codes.new_code(conn)
@@ -215,7 +229,8 @@ async def create_case(body: CaseCreate, x_source: str = Header("staff")) -> Case
             name=body.name, phone=digits(body.phone), issue_type=body.issue_type,
             description=body.description, lookup_code=code, created_at=ts, updated_at=ts))
         case = fetch_case(conn, cur.inserted_primary_key[0])
-        log_event(conn, db.case_pk(case.id), "created", None, case.id, x_source)
+        log_event(conn, db.case_pk(case.id), "created", None, case.id, x_source,
+                  clean_actor(x_actor))
     await broadcast("case", case.id)
     return CaseCreated(**case.model_dump(), lookup_code=code)
 
@@ -237,7 +252,8 @@ def list_cases(phone: str | None = None, since: str | None = None) -> list[Case]
 
 # declared before /cases/{case_id}, or FastAPI reads "lookup" as a case id
 @app.get("/cases/lookup")
-async def lookup_by_code(code: str, x_call_id: str = Header(""), x_source: str = Header("staff")) -> Case:
+async def lookup_by_code(code: str, x_call_id: str = Header(""), x_source: str = Header("staff"),
+                         x_actor: str = Header("")) -> Case:
     """The caller's three spoken words. Unknown and malformed codes get the same 404: no oracle."""
     with db.connect() as conn:
         row = conn.execute(
@@ -250,7 +266,8 @@ async def lookup_by_code(code: str, x_call_id: str = Header(""), x_source: str =
                     raise HTTPException(status_code=429, detail="too many attempts")
             raise HTTPException(status_code=404, detail="no case for that code")
         case = to_cases(conn, [row])[0]  # Case has no lookup_code field, so it can't leak
-        log_event(conn, row.id, "looked_up", None, x_call_id or "voice", x_source)
+        log_event(conn, row.id, "looked_up", None, x_call_id or "voice", x_source,
+                  clean_actor(x_actor))
     await broadcast("case", case.id)
     return case
 
@@ -262,15 +279,17 @@ def get_case(case_id: str) -> Case:
 
 
 @app.patch("/cases/{case_id}")
-async def update_case(case_id: str, body: CaseUpdate, x_source: str = Header("staff")) -> Case:
+async def update_case(case_id: str, body: CaseUpdate, x_source: str = Header("staff"),
+                      x_actor: str = Header("")) -> Case:
     case_pk = db.case_pk(case_id)
     changes = body.model_dump(exclude_none=True)
+    actor = clean_actor(x_actor)
     with db.connect() as conn:
         before = fetch_case(conn, case_pk)  # 404 before touching anything
         for field, new in changes.items():
             old = getattr(before, field)
             if old != new:  # re-sending the same value is not a change worth auditing
-                log_event(conn, case_pk, field, old, new, x_source)
+                log_event(conn, case_pk, field, old, new, x_source, actor)
         if changes:
             conn.execute(update(db.cases).where(db.cases.c.id == case_pk)
                          .values(**changes, updated_at=now()))
@@ -280,13 +299,13 @@ async def update_case(case_id: str, body: CaseUpdate, x_source: str = Header("st
 
 
 @app.post("/cases/{case_id}/notes", status_code=201)
-async def add_case_note(case_id: str, body: NoteCreate,
-                        x_source: str = Header("staff")) -> CaseEvent:
+async def add_case_note(case_id: str, body: NoteCreate, x_source: str = Header("staff"),
+                        x_actor: str = Header("")) -> CaseEvent:
     """One POST appends one note. No read-modify-write, so two writers can't lose a note."""
     case_pk = db.case_pk(case_id)
     with db.connect() as conn:
         case = fetch_case(conn, case_pk)  # 404 before touching anything
-        event = log_event(conn, case_pk, "note", None, body.text, x_source)
+        event = log_event(conn, case_pk, "note", None, body.text, x_source, clean_actor(x_actor))
         # the note is the case's newest change, and ?since= has to see it
         conn.execute(update(db.cases).where(db.cases.c.id == case_pk).values(updated_at=event.ts))
     await broadcast("case", case.id)
@@ -348,7 +367,8 @@ def get_call(call_id: str) -> CallDetail:
 
 
 @app.patch("/calls/{call_id}")
-async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("staff")) -> Call:
+async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("staff"),
+                      x_actor: str = Header("")) -> Call:
     call_pk = db.call_pk(call_id)
     changes = body.model_dump(exclude_none=True)
     with db.connect() as conn:
@@ -359,7 +379,7 @@ async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("st
             case = fetch_case(conn, db.case_pk(changes.pop("case_id")))  # 404 "case not found"
             case_pk = db.case_pk(case.id)
             # the old agent path: moving the cursor is also a link
-            link_case(conn, call_pk, case_pk, "looked_up", x_source)
+            link_case(conn, call_pk, case_pk, "looked_up", x_source, clean_actor(x_actor))
             changes["current_case_id"] = case_pk
         if changes.get("status") == "ended":
             changes["ended_at"] = now()
@@ -372,7 +392,7 @@ async def update_call(call_id: str, body: CallUpdate, x_source: str = Header("st
 
 @app.post("/calls/{call_id}/cases")
 async def add_call_case(call_id: str, body: CallCaseLink, response: Response,
-                        x_source: str = Header("staff")) -> Call:
+                        x_source: str = Header("staff"), x_actor: str = Header("")) -> Call:
     """Link a case to a call, and make it the one the agent is working (calls.current_case_id).
 
     201 when the link is new, 200 when the call was already linked to that case.
@@ -382,7 +402,8 @@ async def add_call_case(call_id: str, body: CallCaseLink, response: Response,
         call = fetch_call(conn, call_pk)  # 404 before touching anything
         case = fetch_case(conn, db.case_pk(body.case_id))
         case_pk = db.case_pk(case.id)
-        response.status_code = 201 if link_case(conn, call_pk, case_pk, body.how, x_source) else 200
+        linked = link_case(conn, call_pk, case_pk, body.how, x_source, clean_actor(x_actor))
+        response.status_code = 201 if linked else 200
         touch_call(conn, call_pk, current_case_id=case_pk)
         call = fetch_call(conn, call_pk)
     await broadcast("call", call.id)
