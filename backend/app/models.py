@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 IssueType = Literal["missed_pickup", "pothole", "streetlight", "water", "animal", "other"]
 Status = Literal["open", "in_progress", "resolved"]
@@ -18,9 +18,21 @@ class CaseCreate(BaseModel):
 
 class CaseUpdate(BaseModel):
     status: Status | None = None
-    notes: str | None = None
     issue_type: IssueType | None = None
     description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def notes_moved(cls, data):
+        # notes are case_events rows now. Ignoring the field would drop a staff edit
+        # silently, so say where it went instead.
+        if isinstance(data, dict) and "notes" in data:
+            raise ValueError("notes is not patchable; POST /cases/{case_id}/notes appends one")
+        return data
+
+
+class NoteCreate(BaseModel):
+    text: str
 
 
 class Case(BaseModel):
@@ -30,7 +42,7 @@ class Case(BaseModel):
     issue_type: IssueType | None
     description: str
     status: Status
-    notes: str
+    notes: str  # derived: every field="note" event on the case, oldest first, joined by "\n"
     created_at: str
     updated_at: str
 
@@ -63,6 +75,7 @@ class Call(BaseModel):
     status: CallStatus
     started_at: str
     ended_at: str | None
+    updated_at: str  # bumped on every write to the call; what GET /calls?since= compares
     room: str | None
     summary: str | None
     transfer_reason: str | None

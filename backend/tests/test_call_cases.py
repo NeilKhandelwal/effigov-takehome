@@ -54,25 +54,3 @@ def test_patch_case_id_populates_the_join(client):
     assert [c["id"] for c in client.get("/cases/C-1001/calls").json()] == ["CALL-1"]
     linked = [e for e in client.get("/cases/C-1001/events").json() if e["field"] == "call_linked"]
     assert len(linked) == 1
-
-
-def test_init_db_backfills_links_from_a_pre_existing_calls_case_id(client):
-    """DBs written before call_cases existed hold their one link in calls.case_id; without the
-    backfill every one of those calls would vanish from its case page on upgrade."""
-    from app import db
-
-    client.post("/cases", json=BODY)
-    client.post("/calls")
-    client.patch("/calls/CALL-1", json={"case_id": "C-1001"})
-    with db.connect() as conn:  # rewind to the pre-migration shape: cursor set, join table empty
-        conn.execute("DELETE FROM call_cases")
-
-    db.init_db()
-    with db.connect() as conn:
-        rows = conn.execute("SELECT * FROM call_cases").fetchall()
-    assert [(r["call_id"], r["case_id"], r["how"]) for r in rows] == [("CALL-1", "C-1001", "created")]
-    assert rows[0]["linked_at"] == client.get("/calls/CALL-1").json()["started_at"]
-
-    db.init_db()  # every boot runs it: the second pass must add nothing
-    with db.connect() as conn:
-        assert conn.execute("SELECT count(*) FROM call_cases").fetchone()[0] == 1

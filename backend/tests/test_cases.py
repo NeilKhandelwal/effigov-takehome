@@ -36,9 +36,9 @@ def test_patch_updates_status_and_bumps_updated_at(client, monkeypatch):
     from app import main
     created = client.post("/cases", json=BODY).json()
     monkeypatch.setattr(main, "now", lambda: "2030-01-01T00:00:00Z")
-    r = client.patch("/cases/C-1001", json={"status": "in_progress", "notes": "crew dispatched"})
+    r = client.patch("/cases/C-1001", json={"status": "in_progress"})
     assert r.status_code == 200
-    assert r.json()["status"] == "in_progress" and r.json()["notes"] == "crew dispatched"
+    assert r.json()["status"] == "in_progress"
     assert r.json()["updated_at"] == "2030-01-01T00:00:00Z"
     assert r.json()["created_at"] == created["created_at"]
     assert r.json()["description"] == BODY["description"]  # untouched fields survive

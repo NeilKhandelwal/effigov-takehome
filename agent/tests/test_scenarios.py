@@ -12,7 +12,6 @@ Run with: uv run pytest -m eval -q
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -199,10 +198,10 @@ def backend(tmp_path, monkeypatch):
     Stubbing the backend would let a scenario "pass" while writing nothing; running the
     real app means a green scenario also means the case exists.
     """
-    monkeypatch.setenv("CASES_DB", str(tmp_path / "evals.db"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'evals.db'}")
     from app import db, main
 
-    monkeypatch.setattr(db, "DB_PATH", os.environ["CASES_DB"])
+    db.reset_engine()  # the cached engine still points at whatever ran before this test
     db.init_db()  # ASGITransport does not run the lifespan that normally does this
 
     transport = httpx.ASGITransport(app=main.app)

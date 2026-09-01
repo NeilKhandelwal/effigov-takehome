@@ -16,12 +16,13 @@ def test_patch_logs_only_changed_fields_with_source(client):
     source tells them whether the voice agent or a person made the edit."""
     client.post("/cases", json=BODY)
     r = client.patch("/cases/C-1001", headers={"X-Source": "voice"},
-                     json={"status": "in_progress", "notes": "called back", "issue_type": "missed_pickup"})
+                     json={"status": "in_progress", "description": "crew dispatched",
+                           "issue_type": "missed_pickup"})
     assert r.status_code == 200
     events = client.get("/cases/C-1001/events").json()[1:]  # skip "created"
     assert [(e["field"], e["old_value"], e["new_value"], e["source"]) for e in events] == [
         ("status", "open", "in_progress", "voice"),
-        ("notes", "", "called back", "voice"),
+        ("description", BODY["description"], "crew dispatched", "voice"),
     ]
 
 
