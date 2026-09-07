@@ -20,8 +20,11 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "ruff",
-    # the scenario evals run the real backend in-process over httpx.ASGITransport
+    # the scenario evals run the real backend in-process over httpx.ASGITransport,
+    # so the agent's dev group needs what backend/app imports: FastAPI and its data layer
     "fastapi",
+    "sqlalchemy",
+    "alembic",
 ]
 
 [tool.uv]
