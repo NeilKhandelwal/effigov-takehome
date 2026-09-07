@@ -443,7 +443,8 @@ def stats(since: str | None = None, until: str | None = None) -> Stats:
     Bucketed in Python rather than in three COUNT queries: the window is one small
     scan, and the buckets have to partition the calls exactly for the counts to add up.
     """
-    q = select(db.calls.c.status, db.calls.c.transfer_reason)
+    q = (select(db.calls.c.status, db.calls.c.transfer_reason)
+         .where(db.calls.c.city_id == db.current_city_id()))  # a city's score is its own calls
     since, until = parse_ts(since), parse_ts(until, "until")
     if since is not None:
         q = q.where(db.calls.c.started_at >= since)  # inclusive, as on the ?since= cursor
