@@ -110,7 +110,8 @@ def notes_of(conn, case_pks: list[int]) -> dict[int, str]:
         return {}
     rows = conn.execute(
         select(db.case_events.c.case_id, db.case_events.c.new_value)
-        .where(db.case_events.c.field == "note", db.case_events.c.case_id.in_(case_pks))
+        .where(db.case_events.c.field == "note", db.case_events.c.case_id.in_(case_pks),
+               db.case_events.c.city_id == db.current_city_id())
         .order_by(db.case_events.c.id)
     )
     notes: dict[int, str] = {}
@@ -125,7 +126,10 @@ def to_cases(conn, rows) -> list[Case]:
 
 
 def fetch_case(conn, case_pk: int | None) -> Case:
-    row = conn.execute(select(db.cases).where(db.cases.c.id == case_pk)).fetchone()
+    # every read of a city-owned table carries this filter; the test suite fails a SELECT
+    # that reaches cases, calls or case_events without one
+    row = conn.execute(select(db.cases).where(
+        db.cases.c.id == case_pk, db.cases.c.city_id == db.current_city_id())).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="case not found")
     return to_cases(conn, [row])[0]
@@ -143,7 +147,8 @@ def to_call(conn, row) -> Call:
 
 
 def fetch_call(conn, call_pk: int | None) -> Call:
-    row = conn.execute(select(db.calls).where(db.calls.c.id == call_pk)).fetchone()
+    row = conn.execute(select(db.calls).where(
+        db.calls.c.id == call_pk, db.calls.c.city_id == db.current_city_id())).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="call not found")
     return to_call(conn, row)
@@ -187,7 +192,7 @@ def log_event(conn, case_pk: int, field: str, old: str | None, new: str | None,
     """The only writer of case_events. source says which system, actor says which person."""
     ts = now()
     cur = conn.execute(insert(db.case_events).values(
-        case_id=case_pk, field=field, old_value=old, new_value=new, source=source, actor=actor,
+        city_id=db.current_city_id(), case_id=case_pk, field=field, old_value=old, new_value=new, source=source, actor=actor,
         ts=ts))
     return CaseEvent(id=cur.inserted_primary_key[0], case_id=db.case_id(case_pk), field=field,
                      old_value=old, new_value=new, source=source, actor=actor, ts=ts)
@@ -226,7 +231,7 @@ async def create_case(body: CaseCreate, x_source: str = Header("staff"),
     with db.connect() as conn:
         code = codes.new_code(conn)
         cur = conn.execute(insert(db.cases).values(
-            name=body.name, phone=digits(body.phone), issue_type=body.issue_type,
+            city_id=db.current_city_id(), name=body.name, phone=digits(body.phone), issue_type=body.issue_type,
             description=body.description, lookup_code=code, created_at=ts, updated_at=ts))
         case = fetch_case(conn, cur.inserted_primary_key[0])
         log_event(conn, db.case_pk(case.id), "created", None, case.id, x_source,
@@ -237,7 +242,7 @@ async def create_case(body: CaseCreate, x_source: str = Header("staff"),
 
 @app.get("/cases")
 def list_cases(phone: str | None = None, since: str | None = None) -> list[Case]:
-    q = select(db.cases)
+    q = select(db.cases).where(db.cases.c.city_id == db.current_city_id())
     if phone is not None:
         q = q.where(db.cases.c.phone == digits(phone))
     since = parse_since(since)
@@ -257,7 +262,8 @@ async def lookup_by_code(code: str, x_call_id: str = Header(""), x_source: str =
     """The caller's three spoken words. Unknown and malformed codes get the same 404: no oracle."""
     with db.connect() as conn:
         row = conn.execute(
-            select(db.cases).where(db.cases.c.lookup_code == codes.normalize(code))
+            select(db.cases).where(db.cases.c.lookup_code == codes.normalize(code),
+                                   db.cases.c.city_id == db.current_city_id())
         ).fetchone()
         if row is None:
             if x_call_id:
@@ -317,7 +323,8 @@ def list_case_events(case_id: str) -> list[CaseEvent]:
     with db.connect() as conn:
         case = fetch_case(conn, db.case_pk(case_id))
         rows = conn.execute(
-            select(db.case_events).where(db.case_events.c.case_id == db.case_pk(case.id))
+            select(db.case_events).where(db.case_events.c.case_id == db.case_pk(case.id),
+                                         db.case_events.c.city_id == db.current_city_id())
             .order_by(db.case_events.c.id)
         )
         return [CaseEvent(**{**r._mapping, "case_id": case.id}) for r in rows]
@@ -329,7 +336,8 @@ def list_case_calls(case_id: str) -> list[CallDetail]:
         case = fetch_case(conn, db.case_pk(case_id))
         rows = conn.execute(
             select(db.calls).join(db.call_cases, db.call_cases.c.call_id == db.calls.c.id)
-            .where(db.call_cases.c.case_id == db.case_pk(case.id))
+            .where(db.call_cases.c.case_id == db.case_pk(case.id),
+                   db.calls.c.city_id == db.current_city_id())
             .order_by(db.calls.c.id)
         ).fetchall()
         return [with_transcript(conn, to_call(conn, r)) for r in rows]
@@ -339,7 +347,8 @@ def list_case_calls(case_id: str) -> list[CallDetail]:
 async def create_call(body: CallCreate = CallCreate()) -> Call:
     ts = now()
     with db.connect() as conn:
-        cur = conn.execute(insert(db.calls).values(started_at=ts, updated_at=ts, room=body.room))
+        cur = conn.execute(insert(db.calls).values(
+            city_id=db.current_city_id(), started_at=ts, updated_at=ts, room=body.room))
         call = fetch_call(conn, cur.inserted_primary_key[0])
     await broadcast("call", call.id)
     return call
@@ -348,7 +357,7 @@ async def create_call(body: CallCreate = CallCreate()) -> Call:
 @app.get("/calls")
 def list_calls(status: CallStatus | None = None, room: str | None = None,
                since: str | None = None) -> list[Call]:
-    q = select(db.calls)
+    q = select(db.calls).where(db.calls.c.city_id == db.current_city_id())
     for column, value in (("status", status), ("room", room)):
         if value is not None:
             q = q.where(db.calls.c[column] == value)

@@ -19,8 +19,12 @@ def new_code(conn) -> str:
     # 27M combinations, so the retry almost never runs
     while True:
         code = "-".join(secrets.choice(WORDS) for _ in range(3))
+        # deliberately not scoped to the city: the unique index on lookup_code is global,
+        # so a code taken by another city would still fail the insert. The execution option
+        # is how the test suite's city-scope guard knows this read is meant to be city-wide.
         taken = conn.execute(
             select(db.cases.c.id).where(db.cases.c.lookup_code == code)
+            .execution_options(city_scope_exempt="lookup codes are unique across all cities")
         ).fetchone()
         if taken is None:
             return code

@@ -34,6 +34,20 @@ def database_url() -> str:
     return "sqlite:///" + str(BACKEND_DIR / "cases.db")
 
 
+# the city row migration 0001 seeds; one deployment serves one city until Phase 3 makes
+# cities real, so the scope is deployment-wide rather than per-request.
+DEFAULT_CITY_ID = 1
+
+
+def current_city_id() -> int:
+    """The city this deployment serves — every read filters on it and every insert writes it.
+
+    Read here and nowhere else: a per-request city later (a header, a staff account) is a
+    change to this one function rather than to every endpoint.
+    """
+    return int(os.environ.get("CITY_ID") or DEFAULT_CITY_ID)
+
+
 metadata = MetaData()
 
 # One row, id 1, until Phase 3 makes cities real. city_id is written on every row now so
