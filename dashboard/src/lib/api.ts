@@ -164,11 +164,67 @@ export const getCaseEvents = (id: string) => request<CaseEvent[]>(`/cases/${id}/
 // without a browser.
 export const shouldPoll = (connected: boolean, pollMs: number) => !connected && pollMs > 0;
 
-// Subscribes to WS /ws and calls refetch() on every frame (frames carry no payload, they
-// just mean "something changed"), once on mount, and once on every open so a reconnect
-// catches up on what it missed while it was down. Reconnects 2s after close. The pollMs
-// interval is the fallback: it runs only while the socket is down. Returns whether the
-// socket is up.
+// ---- The one socket ----
+// Every useLiveRefresh on the page shares a single WS /ws connection: the page's hook and
+// Nav's Live/Polling dot used to open one each. Ref-counted — the first subscriber opens
+// it, the last one to leave closes it — so nothing here outlives the pages using it.
+type Subscriber = {
+  frame: () => void; // "something changed": refetch
+  state: (connected: boolean) => void;
+};
+
+const subscribers = new Set<Subscriber>();
+let socket: WebSocket | null = null;
+let socketRetry: ReturnType<typeof setTimeout> | undefined;
+let socketUp = false;
+
+function announce(up: boolean) {
+  socketUp = up;
+  subscribers.forEach((s) => s.state(up));
+}
+
+function openSocket() {
+  const ws = new WebSocket(API.replace(/^http/, "ws") + "/ws");
+  socket = ws;
+  // A socket we have already replaced or dropped must not announce or reconnect: its
+  // close event lands after the new one is up (React remounts do exactly this).
+  const current = () => socket === ws;
+  ws.onopen = () => {
+    if (!current()) return;
+    announce(true);
+    // Catch up on everything that changed while the socket was down.
+    subscribers.forEach((s) => s.frame());
+  };
+  ws.onmessage = () => {
+    if (current()) subscribers.forEach((s) => s.frame());
+  };
+  // No onerror handler: the spec always follows an error with a close, which is here.
+  ws.onclose = () => {
+    if (!current()) return;
+    announce(false);
+    if (subscribers.size) socketRetry = setTimeout(openSocket, 2000);
+  };
+}
+
+function subscribe(sub: Subscriber) {
+  subscribers.add(sub);
+  if (socket) sub.state(socketUp); // joined a socket that is already open: tell it so
+  else openSocket();
+  return () => {
+    subscribers.delete(sub);
+    if (subscribers.size) return;
+    clearTimeout(socketRetry);
+    const dropped = socket;
+    socket = null; // before close(), so the close event knows it is stale
+    socketUp = false;
+    dropped?.close();
+  };
+}
+
+// Refetches on every frame from the shared socket (frames carry no payload, they just mean
+// "something changed"), once on mount, and once on every socket open so a reconnect catches
+// up on what it missed. The pollMs interval is the fallback: it exists only while the socket
+// is down. Returns whether the socket is up.
 export function useLiveRefresh(refetch: () => void, { pollMs = 2000 }: { pollMs?: number } = {}) {
   const latest = useRef(refetch);
   const [connected, setConnected] = useState(false);
@@ -180,43 +236,12 @@ export function useLiveRefresh(refetch: () => void, { pollMs = 2000 }: { pollMs?
   useEffect(() => {
     refetch();
   }, [refetch]);
+  useEffect(() => subscribe({ frame: () => latest.current(), state: setConnected }), []);
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    let poll: ReturnType<typeof setInterval> | undefined;
-    let unmounted = false;
-    const setPolling = (on: boolean) => {
-      if (on === !!poll) return;
-      if (on) {
-        poll = setInterval(() => latest.current(), pollMs);
-      } else {
-        clearInterval(poll);
-        poll = undefined;
-      }
-    };
-    const connect = () => {
-      ws = new WebSocket(API.replace(/^http/, "ws") + "/ws");
-      ws.onopen = () => {
-        setConnected(true);
-        setPolling(false);
-        latest.current(); // catch up on everything that changed while the socket was down
-      };
-      ws.onmessage = () => latest.current();
-      ws.onerror = () => setPolling(shouldPoll(false, pollMs));
-      ws.onclose = () => {
-        setConnected(false);
-        setPolling(shouldPoll(false, pollMs));
-        if (!unmounted) retry = setTimeout(connect, 2000);
-      };
-    };
-    connect();
-    return () => {
-      unmounted = true;
-      clearTimeout(retry);
-      setPolling(false);
-      ws?.close();
-    };
-  }, [pollMs]);
+    if (!shouldPoll(connected, pollMs)) return;
+    const poll = setInterval(() => latest.current(), pollMs);
+    return () => clearInterval(poll);
+  }, [connected, pollMs]);
   return connected;
 }
 
