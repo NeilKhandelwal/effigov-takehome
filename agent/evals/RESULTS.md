@@ -106,3 +106,70 @@ back to prove the null landed (#18).
 before `agent.py`'s `load_dotenv`, which does not override existing variables, so every eval hit
 LiveKit Inference with the key `"test"` → 401 on all 19. Fix: conftest loads `agent/.env` first,
 then applies the dummies. `uv run pytest` (unit) still passes without keys.
+
+## Fourth run — 21 scenarios, 2026-09-07 (main ceba6dc + the spend cap)
+
+**20/21**, 112 s wall clock, one run, not re-rolled. The first run to include the two multi-case
+scenarios added after the freeze, and the first under the per-run LLM call cap.
+
+| # | Scenario | Expected | Got | Pass |
+|---|---|---|---|---|
+| 20 | two separate problems in one call open two cases | `create_case`, `pothole`, then a second `create_case`, `missed_pickup` | second case never opened | ❌ |
+| 21 | the same problem restated stays one case | one `create_case`, one case in the DB | as expected | ✅ |
+
+Scenarios 1–19 unchanged and all passing on this run.
+
+**#20 — two separate problems in one call open two cases**
+
+```
+E  AssertionError: expected a create_case call (matching its argument check) after index 2; got
+   [('create_case', {'name': 'Maria Lopez', 'phone': '9259157062'}),
+    ('update_case', {'description': None, 'issue_type': 'pothole'}),
+    ('update_case', {'description': "It's about a foot wide near the curb.", 'issue_type': None})]
+```
+
+Real miss, and the one this scenario was written to catch: told about the missed pickup after the
+pothole was filed, the agent folded it into the open case instead of opening a second one. The gate
+(`can_open_case`) was satisfied — the first case had both a type and a description — so this is the
+prompt, not the tool. Left failing on purpose: it is the regression the nightly is supposed to
+show, and fixing the prompt is a change that ships with its own run.
+
+**Also found:** the evals could not run at all since the SQLAlchemy + Alembic migration —
+`tests/test_scenarios.py` imports `backend/app`, whose `db.py` now needs `sqlalchemy`, and the
+agent's dev group only had `fastapi`. Every eval errored in the `backend` fixture before reaching
+the LLM, which is what a nightly run would have done on the first green-looking night. `sqlalchemy`
+and `alembic` are now in the agent's dev dependencies.
+
+### What a run costs — the numbers the cap is set from
+
+Completions per scenario, counted in the LLM client (`CountedLLM` wraps `inference.LLM`, so a
+scenario's turn count is not the measure — the round trip after each tool call costs one too):
+
+```
+   6  pothole maps to pothole                  4  note lands on the case the code found
+   6  trash not collected maps to missed_pickup 2  out of scope question touches no case tool
+   7  dark street lamp maps to streetlight      3  second out of scope question
+   7  water main leak maps to water             2  asking for a person transfers
+   6  stray dog maps to animal                 10  goodbye after a filed request ends the call
+   7  loud neighbours falls back to other       4  case opened at name and phone, no issue type
+   4  phone spoken with dots and dashes         7  three wrong codes hand the caller to staff
+   4  phone spoken entirely in words           10  two separate problems open two cases
+   4  seven digit phone is refused              9  the same problem restated stays one case
+   1  name without a phone opens no case
+   8  case is opened before the issue is known 113  total
+```
+
+Mean 5.4, worst 10. `EVAL_MAX_LLM_CALLS` defaults to 10 × the scenarios collected (210 here, ~1.9×
+a real run): headroom for a flakier night, none for a loop. `EVAL_SCENARIO_TIMEOUT_S` defaults to
+90 s against a ~5 s scenario.
+
+**Cap verified** by a second run at `EVAL_MAX_LLM_CALLS=3`: exactly 3 completions spent, all 21
+scenarios failed, exit 1, 3.8 s.
+
+```
+conftest.EvalBudgetError: LLM call cap reached: 3 completions used, EVAL_MAX_LLM_CALLS=3.
+Remaining scenarios are not run. Per scenario so far: {'pothole maps to pothole': 3}
+...
+conftest.EvalBudgetError: LLM call cap reached: EVAL_MAX_LLM_CALLS=3 completions spent by an
+earlier scenario; this one was not run
+```
