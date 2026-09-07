@@ -154,3 +154,30 @@ The endpoints and every payload above are unchanged except where this section sa
   event is filtered to that city and every write records it, so a case filed by one city is a
   404 from another — including by lookup code. No endpoint takes a city: it is a property of the
   deployment, not of the request, and no payload changes.
+
+## Containment (added 2026-09-07) — `GET /stats`
+The headline metric: the share of calls the agent handled with nobody from the city on the line.
+```json
+{"calls": 9, "contained": 5, "needs_person": 2, "active": 2, "containment": 0.7142857142857143}
+```
+- `GET /stats?since=<ISO>&until=<ISO>` -> Stats. Both bounds optional and **inclusive**, both on
+  `calls.started_at` — when the call came in, not when it was last touched, so a window's answer
+  stops changing once the window is over. `since` is inclusive for the same reason the `?since=`
+  cursor is (second-resolution timestamps), and `until` matches it. A bound that is not an
+  ISO-8601 timestamp is a **422**, as on the list endpoints.
+- Every call in the window falls in exactly one bucket, so `calls == contained + needs_person + active`:
+  - **contained** — `status="ended"` and `transfer_reason IS NULL`: it ended, and nobody ever asked
+    for a person. `transfer_reason` is the marker that survives, because `transfer_to_staff` writes
+    it alongside `status="needs_person"` and the end-of-call `PATCH {"status": "ended"}` leaves it
+    alone. Status alone would not work: `needs_person` is overwritten by `ended`.
+  - **needs_person** — `status="needs_person"` (still waiting) or ended with a `transfer_reason`.
+  - **active** — `status="active"`. Excluded from the denominator: a call still on the line has not
+    been contained or transferred yet. A transferred call that staff PATCH back to `active` counts
+    as active while it is live, and lands in `needs_person` once it ends, because its
+    `transfer_reason` is still there.
+- `containment` = `contained / (contained + needs_person)`, a float in 0–1, and **null** when that
+  denominator is 0. Null, not 0 and not 1: an empty window is "no calls to judge", and rendering
+  either number would read as a real score. The dashboard shows `—`.
+- Dashboard: a containment tile on the home page with the percentage, `contained / handled`
+  underneath, and a Today / 7 days / 30 days / All window selector (default 7 days). It refetches
+  through the same `useLiveRefresh` as everything else; no new socket, no second poll.
