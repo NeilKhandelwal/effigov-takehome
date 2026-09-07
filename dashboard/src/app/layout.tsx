@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "EffiGov · Case Desk",
-  description: "EffiGov take-home case dashboard",
+  description: "EffiGov case dashboard",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
