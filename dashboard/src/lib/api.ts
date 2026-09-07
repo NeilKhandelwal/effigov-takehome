@@ -119,6 +119,20 @@ export const getCaseCalls = (id: string) => request<CallWithTranscript[]>(`/case
 export const patchCall = (id: string, body: Partial<Pick<Call, "status" | "transfer_reason" | "case_id">>) =>
   request<Call>(`/calls/${id}`, json("PATCH", body));
 
+// ---- Containment (see ../CONTRACT.md "## Containment") ----
+
+export type Stats = {
+  calls: number; // contained + needs_person + active
+  contained: number; // ended, and nobody ever asked for a person
+  needs_person: number; // waiting for staff, or ended after a transfer
+  active: number; // still on the line, so not scored either way
+  containment: number | null; // 0-1; null when nothing in the window has been handled yet
+};
+
+// since/until are on the call's started_at, both inclusive, both optional.
+export const getStats = (since?: string) =>
+  request<Stats>(since ? `/stats?since=${encodeURIComponent(since)}` : "/stats");
+
 // ---- Browser call (see ../CONTRACT.md "## Browser call") ----
 
 export type Grant = { token: string; url: string; room: string };

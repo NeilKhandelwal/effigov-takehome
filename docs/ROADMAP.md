@@ -95,9 +95,11 @@ localhost alone.
 
 ## Phase 5 — Product
 
-- [ ] **Containment on the home page** — share of calls handled with no staff, over a
+- [x] **Containment on the home page** — share of calls handled with no staff, over a
       chosen window.
       *Done when:* the number on the page matches a hand count of the same calls.
+      `GET /stats?since=&until=` over `calls.started_at`; contained = ended with no
+      `transfer_reason`, active calls excluded from the denominator, null on an empty window.
 - [ ] **Coverage report** — transfers and failed lookups grouped by reason, ranked by how
       many residents each one cost.
       *Done when:* a week of calls produces a ranked list of fixes, not a log.

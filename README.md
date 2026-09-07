@@ -191,6 +191,7 @@ every payload, is in [docs/CONTRACT.md](docs/CONTRACT.md).
 | `GET` / `PATCH` | `/calls/{id}` | PATCH `status` (`active` \| `needs_person` \| `ended`), `case_id`, `summary`, `transfer_reason`; a call reads back `case_id` (the case being worked now) and `case_ids` (every case it touched, in link order) |
 | `POST` | `/calls/{id}/cases` | body `{case_id, how}` (`created` \| `looked_up`); links the case and makes it the current one. 201 new link, 200 already linked, 404 unknown call or case. One `call_linked` event per (case, call) |
 | `POST` | `/calls/{id}/transcript` | `{role: user\|agent, text}` |
+| `GET` | `/stats[?since=&until=]` | containment over a window of `started_at` (both bounds inclusive, 422 if not ISO): `{calls, contained, needs_person, active, containment}`; `containment` is null, not 0, when nothing in the window has been handled |
 | `GET` | `/token?identity=` | LiveKit join token + a fresh room name for the browser call |
 | `GET` | `/health` | `{"ok": true}`; the dashboard uses it to show "Backend unreachable" |
 | `WS` | `/ws` | one `{type, id}` frame after every write; clients refetch |

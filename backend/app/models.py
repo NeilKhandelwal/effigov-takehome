@@ -98,6 +98,15 @@ class CallDetail(Call):
     transcript: list[TranscriptLine]
 
 
+class Stats(BaseModel):
+    """GET /stats over a window of calls.started_at (CONTRACT "## Containment")."""
+    calls: int  # contained + needs_person + active: every call in the window is in one bucket
+    contained: int
+    needs_person: int
+    active: int
+    containment: float | None  # 0-1; None when nothing has been handled yet, never 0
+
+
 class CaseEvent(BaseModel):
     id: int
     case_id: str
