@@ -1,8 +1,38 @@
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
+
+# The tables that carry a city_id. call_cases and transcript hang off a call that was
+# already fetched under the city scope, so they have no column to filter on.
+CITY_TABLES = ("cases", "calls", "case_events")
+_READS_CITY_TABLE = re.compile(r'\b(?:from|join)\s+"?(?:%s)"?\b' % "|".join(CITY_TABLES))
+_HAS_CITY_CRITERION = re.compile(r"city_id\s*(?:=|in\b)")
+
+
+class UnscopedRead(AssertionError):
+    """A SELECT reached a city-owned table without a city_id criterion."""
+
+
+@event.listens_for(Engine, "before_cursor_execute")
+def forbid_unscoped_reads(conn, cursor, statement, parameters, context, executemany):
+    """The city scope, enforced for the whole suite rather than test by test.
+
+    Every SELECT that touches cases, calls or case_events must filter on city_id, so any
+    existing test that exercises a read it forgot fails here instead of quietly returning
+    another city's rows. A read that is meant to be city-wide says so at the call site with
+    `.execution_options(city_scope_exempt=<why>)` — codes.new_code is the one such read.
+    """
+    if getattr(context, "execution_options", {}).get("city_scope_exempt"):
+        return
+    sql = statement.lower().lstrip()
+    if not sql.startswith("select") or _HAS_CITY_CRITERION.search(sql):
+        return
+    if _READS_CITY_TABLE.search(sql):
+        raise UnscopedRead(f"SELECT with no city_id criterion: {statement}")
 
 
 def wipe(url: str) -> None:

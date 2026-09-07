@@ -231,7 +231,8 @@ def test_two_cases_cannot_share_a_lookup_code(client):
     client.post("/cases", json=BODY)
     client.post("/cases", json=BODY)
     with db.connect() as conn:
-        code = conn.execute(select(db.cases.c.lookup_code).where(db.cases.c.id == 1)).scalar()
+        code = conn.execute(select(db.cases.c.lookup_code).where(
+            db.cases.c.id == 1, db.cases.c.city_id == db.current_city_id())).scalar()
     with pytest.raises(IntegrityError):
         with db.connect() as conn:
             conn.execute(update(db.cases).where(db.cases.c.id == 2).values(lookup_code=code))

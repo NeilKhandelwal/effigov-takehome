@@ -82,7 +82,8 @@ a local clone needs no infrastructure; compose and CI run `postgresql+psycopg://
 `postgres:16`. The schema lives in Alembic migrations under `backend/migrations/`, applied by
 `alembic upgrade head` at app startup and in the Docker entrypoint; nothing else creates or alters a
 table, and a database written before those migrations is refused at startup rather than half-upgraded
-in place. Foreign keys are on (SQLite gets `PRAGMA foreign_keys=ON` per connection), so the database
+in place. `CITY_ID` (default `1`, the seeded city) names the city this deployment serves: every read
+is filtered to it and every write records it. Foreign keys are on (SQLite gets `PRAGMA foreign_keys=ON` per connection), so the database
 itself rejects a call linked to a case that does not exist, and `lookup_code` is unique. Every row also carries a `city_id`,
 defaulted to the one seeded city — internal for now, and not in any response.
 

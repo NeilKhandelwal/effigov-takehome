@@ -148,5 +148,9 @@ The endpoints and every payload above are unchanged except where this section sa
   is refused at startup with a message saying to move it aside; there is no in-place upgrade, and
   a half-applied one would be worse. An empty or already-migrated database starts normally.
 - **`city_id`** is on `cases`, `calls` and `case_events`, defaulted to the one seeded city
-  (`cities` row 1, "Demo City"). It is internal for now: not in any response body, not a filter.
-  Scoping reads by city is Phase 2's next item.
+  (`cities` row 1, "Demo City"). It stays internal: not in any request or response body.
+- **City scope (added 2026-09-07).** One deployment serves one city, named by the `CITY_ID`
+  environment variable (default `1`, the seeded city). Every read of a case, a call or a case
+  event is filtered to that city and every write records it, so a case filed by one city is a
+  404 from another — including by lookup code. No endpoint takes a city: it is a property of the
+  deployment, not of the request, and no payload changes.

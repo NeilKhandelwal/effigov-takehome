@@ -33,11 +33,12 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
       mutates the schema.
       SQLAlchemy Core + Alembic; `DATABASE_URL` picks the engine, Postgres in compose and
       CI, SQLite by default so a local clone still needs no infra.
-- [ ] **`city_id` on cases, calls, and case_events** — one deployment, many cities.
+- [x] **`city_id` on cases, calls, and case_events** — one deployment, many cities.
       *Done when:* every read is scoped by city and a query without a city scope fails
       in tests.
-      Column and the seeded city exist on all three tables; scoping the reads is what is
-      left, and it is a query change now rather than a migration of live data.
+      The city comes from `CITY_ID` via `db.current_city_id()` — one deployment, one city —
+      and a test-suite engine listener fails any SELECT that reaches those tables without a
+      `city_id` criterion, so the whole suite is the proof.
 - [x] **Row-id foreign keys** — store integer keys, derive `C-1001` / `CALL-7` in the API
       layer, and turn `PRAGMA foreign_keys` (or its Postgres equivalent) on.
       *Done when:* the database rejects a call linked to a case that does not exist,
