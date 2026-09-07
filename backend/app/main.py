@@ -14,7 +14,7 @@ from sqlalchemy import insert, select, update
 from app import codes, db
 from app.models import (Call, CallCaseLink, CallCreate, CallDetail, CallStatus, CallUpdate, Case,
                         CaseCreate, CaseCreated, CaseEvent, CaseUpdate, NoteCreate,
-                        TranscriptCreate, TranscriptLine)
+                        Stats, TranscriptCreate, TranscriptLine)
 
 load_dotenv(".env")  # LIVEKIT_* for /token, CORS_ORIGINS; python-dotenv ships with uvicorn[standard]
 
@@ -86,21 +86,22 @@ def clean_actor(raw: str) -> str | None:
     return raw.strip()[:ACTOR_MAX] or None
 
 
-def parse_since(since: str | None) -> str | None:
-    """Validate ?since= and hand it back as the string the columns are compared against.
+def parse_ts(value: str | None, name: str = "since") -> str | None:
+    """Validate a timestamp query parameter and hand it back as the string the columns
+    are compared against.
 
     It is only ever compared as a string, but it still has to BE a timestamp: an unparseable
     cursor used to match nothing at all, which a client reads as "nothing has changed" —
     forever, and silently.
     """
-    if since is None:
+    if value is None:
         return None
     try:
-        datetime.fromisoformat(since)
+        datetime.fromisoformat(value)
     except ValueError:
         raise HTTPException(status_code=422,
-                            detail="since must be an ISO-8601 timestamp, e.g. 2026-08-30T12:00:00Z")
-    return since
+                            detail=f"{name} must be an ISO-8601 timestamp, e.g. 2026-08-30T12:00:00Z")
+    return value
 
 
 def notes_of(conn, case_pks: list[int]) -> dict[int, str]:
@@ -245,7 +246,7 @@ def list_cases(phone: str | None = None, since: str | None = None) -> list[Case]
     q = select(db.cases).where(db.cases.c.city_id == db.current_city_id())
     if phone is not None:
         q = q.where(db.cases.c.phone == digits(phone))
-    since = parse_since(since)
+    since = parse_ts(since)
     if since is not None:
         # inclusive, and ISO-8601 Z strings compare as strings. Timestamps are only
         # second-resolution: a strict > drops every row written in the cursor's own second,
@@ -361,7 +362,7 @@ def list_calls(status: CallStatus | None = None, room: str | None = None,
     for column, value in (("status", status), ("room", room)):
         if value is not None:
             q = q.where(db.calls.c[column] == value)
-    since = parse_since(since)
+    since = parse_ts(since)
     if since is not None:
         q = q.where(db.calls.c.updated_at >= since)  # inclusive, as on /cases
     with db.connect() as conn:
@@ -433,3 +434,28 @@ async def add_transcript(call_id: str, body: TranscriptCreate) -> TranscriptLine
         touch_call(conn, call_pk)  # a new line is a change to the call, for ?since=
     await broadcast("transcript", call.id)
     return line
+
+
+@app.get("/stats")
+def stats(since: str | None = None, until: str | None = None) -> Stats:
+    """Containment over a window of calls.started_at (CONTRACT "## Containment").
+
+    Bucketed in Python rather than in three COUNT queries: the window is one small
+    scan, and the buckets have to partition the calls exactly for the counts to add up.
+    """
+    q = select(db.calls.c.status, db.calls.c.transfer_reason)
+    since, until = parse_ts(since), parse_ts(until, "until")
+    if since is not None:
+        q = q.where(db.calls.c.started_at >= since)  # inclusive, as on the ?since= cursor
+    if until is not None:
+        q = q.where(db.calls.c.started_at <= until)  # and inclusive at the far end to match
+    with db.connect() as conn:
+        rows = conn.execute(q).fetchall()
+    active = sum(r.status == "active" for r in rows)
+    # transfer_reason is the marker that survives to ended; status "needs_person" does not
+    contained = sum(r.status == "ended" and r.transfer_reason is None for r in rows)
+    handled = len(rows) - active
+    return Stats(calls=len(rows), contained=contained, needs_person=handled - contained,
+                 active=active,
+                 # None, not 0: an empty window has nothing to score, and 0% reads as a failure
+                 containment=contained / handled if handled else None)
