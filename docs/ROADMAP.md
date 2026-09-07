@@ -80,10 +80,14 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
       Done as a second field, not a replacement: `source` still says which system, `actor`
       says which person. The dashboard sends `X-Actor` from the session; the backend trusts
       it until backend auth lands.
-- [ ] **Nightly eval run in CI** — the scenario suite on a schedule, with a hard cap on
+- [x] **Nightly eval run in CI** — the scenario suite on a schedule, with a hard cap on
       LLM spend per run.
       *Done when:* a prompt regression shows up as a failed nightly run and the cap stops
       the job before the bill does.
+      `EVAL_MAX_LLM_CALLS` completions per run (default 10 × the scenarios) and
+      `EVAL_SCENARIO_TIMEOUT_S` per scenario, both enforced in the harness and passed
+      through the workflow under `timeout-minutes: 20`; the three `LIVEKIT_*` repository
+      secrets are the one step left, and the job skips with a notice until they are set.
 
 ## Phase 4 — Voice for real
 

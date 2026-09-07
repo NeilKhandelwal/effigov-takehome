@@ -149,7 +149,16 @@ Compose runs `postgres:16` on the named volume `pg-data`; the backend waits for 
 
 `.github/workflows/ci.yml` runs on every push to `main` and every PR: backend pytest twice — once on SQLite and once against a `postgres:16` service container, the same suite both times — agent pytest (unit tests only -- the `eval` marker stays deselected and no LiveKit keys are needed), and dashboard `npm run lint` + `npm run build`, in parallel.
 
-`.github/workflows/evals.yml` runs the LLM scenario evals (`pytest -m eval`) on a nightly cron and on manual dispatch. It needs three repository secrets -- **`LIVEKIT_URL`**, **`LIVEKIT_API_KEY`**, **`LIVEKIT_API_SECRET`** -- and skips with a notice if they are not set.
+`.github/workflows/evals.yml` runs the LLM scenario evals (`pytest -m eval`) on a nightly cron and on manual dispatch. It needs three repository secrets -- **`LIVEKIT_URL`**, **`LIVEKIT_API_KEY`**, **`LIVEKIT_API_SECRET`** -- and skips with a notice if they are not set. Set them once, from the `agent/.env` that already runs the evals locally:
+
+```sh
+cd agent && set -a && . ./.env && set +a          # loads the three values into the shell
+gh secret set LIVEKIT_URL --body "$LIVEKIT_URL"
+gh secret set LIVEKIT_API_KEY --body "$LIVEKIT_API_KEY"
+gh secret set LIVEKIT_API_SECRET --body "$LIVEKIT_API_SECRET"
+```
+
+The nightly is metered: the job has `timeout-minutes: 20`, the harness's own spend cap applies (`EVAL_MAX_LLM_CALLS`, `EVAL_SCENARIO_TIMEOUT_S` — see **Evals** below, overridable as repository *variables*), and a scenario that fails fails the job, because a prompt regression showing up as a red nightly run is the whole point.
 
 ## Testing
 
@@ -169,11 +178,19 @@ in the pull request that added it.
 **Evals** — `cd agent && uv run pytest -m eval` runs 21 hand-labelled scenarios through the real
 `Assistant` and the real backend in-process, and checks which tools it called with what, what the
 caller would hear, and what landed in the database. They make live LLM calls and need `LIVEKIT_*`
-in `agent/.env`, so they are deselected by default. Results across three runs are recorded in
+in `agent/.env`, so they are deselected by default. Results across four runs are recorded in
 [agent/evals/RESULTS.md](agent/evals/RESULTS.md): **12/15** on the first prompt, **14/15** after
 fixing the two misses it found, **19/19** after adding scenarios for warm transfer, `end_call`, and
-null-until-classified. Single runs, not re-rolled; the two multi-case scenarios added afterwards
-have not been run yet.
+null-until-classified, and **20/21** on the first run that included the two multi-case scenarios.
+Single runs, not re-rolled.
+
+*The cap.* A run is metered so a looping agent or a hung call cannot spend without a ceiling:
+`EVAL_MAX_LLM_CALLS` is the number of LLM completions the whole pytest session may make (default
+10 × the scenarios collected — a real run spends 5.4 each, 10 at the worst), and
+`EVAL_SCENARIO_TIMEOUT_S` is the wall clock one scenario gets (default 90; a scenario takes ~5 s).
+Over either, the run fails: the completion that would have gone over is never made, every
+remaining scenario fails without calling out, and `pytest` exits non-zero. Locally that means the
+score is still what the run reports — nothing forces 21/21 — while in CI any miss is a red job.
 
 ## API
 

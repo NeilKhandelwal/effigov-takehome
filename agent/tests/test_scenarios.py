@@ -9,8 +9,12 @@ scenario also proves the case really landed in the DB.
 
 Marked `eval` and deselected by default -- they hit a live LLM and need LIVEKIT_* keys.
 Run with: uv run pytest -m eval -q
+
+Spend is capped per run: `EVAL_MAX_LLM_CALLS` completions in total and
+`EVAL_SCENARIO_TIMEOUT_S` seconds per scenario (see `conftest.EvalBudget`).
 """
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -286,23 +290,58 @@ def check(calls, expected):
         )
 
 
-async def run_scenario(turns):
+class CountedLLM(inference.LLM):
+    """The shipped inference client, with every completion charged to the run's budget.
+
+    Subclassing is the seam that cannot be missed: whatever asks for a completion -- a
+    turn, the round trip after a tool call, the hang-up summary -- goes through `chat()`.
+    """
+
+    def __init__(self, budget, scenario, **kwargs):
+        super().__init__(**kwargs)
+        self._budget = budget
+        self._scenario = scenario
+
+    def chat(self, **kwargs):
+        self._budget.spend(self._scenario)  # raises instead of making the call, when over
+        return super().chat(**kwargs)
+
+
+def count_llm_calls(monkeypatch, budget, scenario):
+    """Point the agent's own LLM at the budget.
+
+    `Assistant()` constructs its own `inference.LLM` inside agent.py and that one wins
+    over `AgentSession(llm=...)`, so the class the agent constructs is the only seam
+    that sees the calls the scenario actually pays for.
+    """
+    monkeypatch.setattr(
+        agent_mod.inference, "LLM", lambda **kw: CountedLLM(budget, scenario, **kw)
+    )
+
+
+async def run_scenario(turns, budget):
     session = AgentSession(llm=inference.LLM(model=MODEL))
     async with session:
         await session.start(Assistant())
-        return [await session.run(user_input=t) for t in turns]
+        results = []
+        for t in turns:
+            results.append(await session.run(user_input=t))
+            budget.raise_if_spent()  # the session may swallow the error from chat(); this is loud
+        return results
 
 
 @pytest.mark.eval
 @pytest.mark.parametrize(
     "name,turns,expected", SCENARIOS, ids=[s[0].replace(" ", "_") for s in SCENARIOS]
 )
-async def test_scenario(name, turns, expected, backend):
+async def test_scenario(name, turns, expected, backend, eval_budget, monkeypatch):
     """Each scenario encodes a case worker's judgement of what should have been filed.
 
     A wrong issue_type or a case opened without a phone is a real intake defect, not a
     style difference, so these must fail when the agent stops behaving that way.
     """
+    eval_budget.raise_if_spent()  # an earlier scenario blew the cap: spend nothing more
+    count_llm_calls(monkeypatch, eval_budget, name)
     http = sync_client(backend)
     if expected.get("note_on") or expected.get("seed_case"):
         # a note needs a case to hang off; seed it through the backend's own endpoint
@@ -320,7 +359,11 @@ async def test_scenario(name, turns, expected, backend):
         # the code is freshly generated per run, so the turns carry a {code} placeholder
         turns = [t.format(code=seeded.json()["lookup_code"].replace("-", " ")) for t in turns]
 
-    results = await run_scenario(turns)
+    try:
+        results = await asyncio.wait_for(run_scenario(turns, eval_budget), eval_budget.timeout_s)
+    except TimeoutError:
+        # a hung LLM call would otherwise hold a CI runner for the length of the job
+        pytest.fail(f"scenario ran past EVAL_SCENARIO_TIMEOUT_S={eval_budget.timeout_s:g}s")
     calls = calls_of(results)
     check(calls, expected)
 
