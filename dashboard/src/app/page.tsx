@@ -8,12 +8,14 @@ import {
   ISSUE_TYPES,
   STATUSES,
   STATUS_COLOR,
+  Stats,
   Status,
   TrackedList,
   ago,
   caseIdsOf,
   duration,
   getCall,
+  getStats,
   humanize,
   listCalls,
   listCases,
@@ -23,6 +25,23 @@ import {
   useNow,
 } from "@/lib/api";
 
+// The containment window. null = all time; 0 = today, from local midnight.
+const WINDOWS: { label: string; days: number | null }[] = [
+  { label: "Today", days: 0 },
+  { label: "7 days", days: 7 },
+  { label: "30 days", days: 30 },
+  { label: "All", days: null },
+];
+
+function windowSince(days: number | null) {
+  if (days === null) return undefined;
+  const d = new Date();
+  if (days === 0) d.setHours(0, 0, 0, 0);
+  else d.setDate(d.getDate() - days);
+  // seconds, no millis: the backend compares these as strings against its own "…Z" stamps
+  return d.toISOString().slice(0, 19) + "Z";
+}
+
 export default function CasesPage() {
   const [cases, setCases] = useState<TrackedList<Case>>(untrackedList);
   const [live, setLive] = useState<CallWithTranscript[]>([]);
@@ -31,6 +50,8 @@ export default function CasesPage() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Status | "all">("all");
   const [issue, setIssue] = useState("all");
+  const [days, setDays] = useState<number | null>(7);
+  const [stats, setStats] = useState<Stats | null>(null);
 
   const load = useCallback(() => {
     listCases()
@@ -48,7 +69,12 @@ export default function CasesPage() {
         setLive(calls.sort((a, b) => Number(b.status === "needs_person") - Number(a.status === "needs_person"))),
       )
       .catch(() => setLive([]));
-  }, []);
+    getStats(windowSince(days))
+      .then(setStats)
+      .catch(() => setStats(null));
+    // days is a dep so changing the window refetches immediately: useLiveRefresh runs
+    // refetch() whenever its identity changes.
+  }, [days]);
 
   useLiveRefresh(load);
   useNow(); // durations tick every second, not only when data arrives
@@ -87,7 +113,30 @@ export default function CasesPage() {
       </div>
       {error && <p className="text-red-700 mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm">{error}</p>}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <div className="col-span-2 md:col-span-1 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">Containment</span>
+            <select
+              value={String(days)}
+              onChange={(e) => setDays(e.target.value === "null" ? null : Number(e.target.value))}
+              className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] text-slate-600"
+            >
+              {WINDOWS.map((w) => (
+                <option key={w.label} value={String(w.days)}>
+                  {w.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* null containment is an empty window, not 0%: nothing has been handled to score */}
+          <div className="text-2xl font-semibold">
+            {stats?.containment == null ? "—" : `${Math.round(stats.containment * 100)}%`}
+          </div>
+          <div className="text-[11px] text-slate-500">
+            {stats ? `${stats.contained} / ${stats.contained + stats.needs_person} handled` : "…"}
+          </div>
+        </div>
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="text-xs text-slate-500">Active calls</div>
           <div className="text-2xl font-semibold flex items-center gap-2">
