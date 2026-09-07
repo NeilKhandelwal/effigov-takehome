@@ -33,8 +33,10 @@ and neither imports the other.
 
 **Real-time.** After every write the backend pushes `{"type": "case"|"call"|"transcript", "id": ...}`
 on `WS /ws`. The socket carries no payload; clients refetch what they are showing. Refetch is
-idempotent, so duplicate or out-of-order frames cannot corrupt UI state. A 2-second poll stays on
-as a fallback (see Phase 1 of the roadmap).
+idempotent, so duplicate or out-of-order frames cannot corrupt UI state. There is one socket per
+page, shared by everything on it — the page's own data and the nav's Live/Polling dot read the same
+connection. The 2-second poll is a fallback: it exists only while that socket is down. Every open,
+including a reconnect, refetches once, so an outage costs one catch-up fetch and nothing else.
 
 **Voice.** LiveKit Inference for STT (AssemblyAI), LLM (`openai/gpt-4.1-mini`, chosen for reliable
 tool calls against a strict `issue_type` enum), and TTS (Fish Audio) — one LiveKit Cloud key, no
@@ -234,8 +236,6 @@ before it is built.
 - `db.connect()` connections are released by CPython refcounting, not closed explicitly. Fine for
   one process.
 - The home page does one `GET /calls/{id}` per active call on every refresh (N+1).
-- The 2-second poll runs on every page even when the socket is healthy, and the nav opens a second
-  socket on every page just to drive the Live/Polling dot (Phase 1).
 - A call whose worker dies mid-call stays `active` forever — there is no heartbeat or timeout;
   `reset_demo` is the only fix.
 - The `/call` page finds its call by the room name it just generated, so a console-mode call only

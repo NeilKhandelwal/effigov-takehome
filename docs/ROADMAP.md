@@ -6,24 +6,36 @@ dependency, not by ambition: nothing in Phase 4 is reachable without accounts.
 
 ## Phase 1 — Foundation
 
-- [ ] **Repo reframe** (this PR) — `docs/` for the contract and decision log, a phased
+- [x] **Repo reframe** — `docs/` for the contract and decision log, a phased
       roadmap, a product README, a project `CLAUDE.md`.
       *Done when:* every relative link in `README.md`, `CLAUDE.md`, and `docs/` resolves,
       and no document describes the repo as a take-home.
+      Links checked with a shell loop over the three; the only "take-home" left is the
+      decision log saying where it started, which is history, not framing.
 - [ ] **Docker Compose for local dev** — backend, dashboard, and agent worker from one
       `docker compose up`.
       *Done when:* a clean clone with `.env` filled in serves the dashboard and answers a
       browser call without the three-terminal dance.
+      Compose runs postgres + backend + dashboard, and the `voice` profile builds the
+      agent; the browser call has never been made through it, so the second half of the
+      "done when" is unproven rather than done.
 - [ ] **GitHub Actions CI** — `pytest` for `backend/` and `agent/` (unit only, evals
       deselected), `npm run build` and `npm run lint` for `dashboard/`.
       *Done when:* every PR shows three required checks and a red one blocks merge.
-- [ ] **Env-driven config** — `NEXT_PUBLIC_API_URL` for the dashboard, CORS origins from
+      `ci.yml` runs four jobs on every PR (backend on SQLite and on Postgres, agent,
+      dashboard), but `main` has no branch protection, so none of them is *required* and
+      a red one blocks nothing.
+- [x] **Env-driven config** — `NEXT_PUBLIC_API_URL` for the dashboard, CORS origins from
       the backend's environment; no hardcoded `localhost:8000` or `localhost:3000`.
       *Done when:* the dashboard talks to a non-localhost backend with no code change.
-- [ ] **Poll as fallback only** — move the 2 s interval into `useLiveRefresh` so it runs
+      Both are env-read with a localhost default; verified by building the dashboard
+      against a backend on another port and watching it talk only to that one.
+- [x] **Poll as fallback only** — move the 2 s interval into `useLiveRefresh` so it runs
       only while the socket is down, and refetch once on every socket open.
       *Done when:* an idle dashboard with a healthy socket issues no periodic requests,
       and a reconnect after a disconnect catches up in one fetch.
+      The interval now exists only while the socket is down, and the page's hook and the
+      Nav dot share one connection instead of opening one each.
 
 ## Phase 2 — Data
 

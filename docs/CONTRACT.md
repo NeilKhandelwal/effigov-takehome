@@ -43,7 +43,8 @@ TranscriptLine: {"id": 12, "call_id": "CALL-7", "role": "user"|"agent", "text": 
 - `WS /ws` -> after EVERY write (case create/patch, call create/patch, transcript append) server pushes
   one JSON text frame: {"type": "case"|"call"|"transcript", "id": "<case or call id>"}.
   Clients treat any frame as "refetch what you're showing". Never carry payloads on the socket.
-- Dashboard: keeps the 2s poll as fallback; on any WS frame, refetch immediately.
+- Dashboard: one socket per page, shared by every component on it; the 2s poll runs only while
+  that socket is down, and every open refetches once. On any WS frame, refetch immediately.
   Home page gets a "Live calls" strip (active calls, last transcript line, link to /calls/[id]).
   /calls/[id] shows the transcript streaming; case detail lists its calls + transcripts.
 - Agent: POST /calls on session start; final user utterances and agent replies -> POST transcript

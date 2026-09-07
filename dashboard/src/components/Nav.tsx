@@ -21,7 +21,8 @@ export default function Nav({ name }: { name: string | null }) {
   // requests should already carry X-Actor.
   setActor(name);
   // The dot only needs the socket state, so no poll: pollMs 0 keeps Nav off the wire
-  // while every page already refetches for itself.
+  // while every page already refetches for itself. The socket itself is shared with the
+  // page's own hook, so the dot costs no connection either.
   const live = useLiveRefresh(NOOP, { pollMs: 0 });
 
   return (
