@@ -22,6 +22,10 @@ jobs:
   evals:
     name: scenario evals
     runs-on: ubuntu-latest
+    # A full run is ~2 minutes. This is the backstop under the harness's own caps: even if
+    # every scenario sat on its 90s timeout the job would run 30+ minutes, and nobody is
+    # watching a 07:00 cron.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: agent
@@ -53,6 +57,13 @@ jobs:
           LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
           LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
           LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          # The spend cap, both halves. Empty means the defaults in agent/tests/conftest.py
+          # (10 completions x the scenarios collected, 90s of wall clock per scenario);
+          # set the repository variables to tighten either without a code change.
+          EVAL_MAX_LLM_CALLS: ${{ vars.EVAL_MAX_LLM_CALLS }}
+          EVAL_SCENARIO_TIMEOUT_S: ${{ vars.EVAL_SCENARIO_TIMEOUT_S }}
+        # No `|| true`: a scenario the agent stops passing is a prompt regression, and the
+        # point of the nightly is that it turns the run red. The score is what the log says.
         run: uv run pytest -m eval -q
 
       - name: Upload eval output
