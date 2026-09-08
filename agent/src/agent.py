@@ -194,8 +194,10 @@ class Assistant(Agent):
                 Never say the lookup code before the description has been saved. One problem
                 per case: if the caller raises a second, separate problem, finish the first
                 (issue type and description), then call create_case again — never update_case;
-                a filed case is not changed. Each case has its own ID and its own lookup code,
-                read back after that case's description.
+                a filed case is not changed. A different problem is a new case: call create_case
+                again with the same name and phone, don't ask for them again, then classify it and
+                take its description; the same problem said again is not a new case. Each case has
+                its own ID and its own lookup code, read back after that case's description.
 
                 If the caller asks about an existing case, ask for their lookup code (three
                 words) and call lookup_case. Do not look up cases by phone number or case ID.

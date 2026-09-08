@@ -173,3 +173,52 @@ Remaining scenarios are not run. Per scenario so far: {'pothole maps to pothole'
 conftest.EvalBudgetError: LLM call cap reached: EVAL_MAX_LLM_CALLS=3 completions spent by an
 earlier scenario; this one was not run
 ```
+
+## Fifth run — 21 scenarios, 2026-09-08 (fix/two-problems-two-cases, one prompt sentence)
+
+**21/21**, 162 s wall clock, one run, not re-rolled. The run that closes the fourth run's #20.
+
+The fourth run left "two separate problems in one call open two cases" failing on purpose: the
+agent folded the missed pickup into the already-filed pothole case. The gate was never the
+problem — `can_open_case` was satisfied — so the fix is one sentence in the prompt, next to the
+"one problem per case" line that was already there:
+
+```
+-                a filed case is not changed. Each case has its own ID and its own lookup code,
+-                read back after that case's description.
++                a filed case is not changed. A different problem is a new case: call create_case
++                again with the same name and phone, don't ask for them again, then classify it and
++                take its description; the same problem said again is not a new case. Each case has
++                its own ID and its own lookup code, read back after that case's description.
+```
+
+The old line said what *not* to do (never `update_case` a filed case) but never said the second
+`create_case` may reuse the name and phone already on the call, so the model had no move it
+recognised as cheap and stalled in conversation instead. The "same problem said again is not a new
+case" half is what keeps #21 from swinging the other way.
+
+| # | Scenario | Expected | Got | Pass |
+|---|---|---|---|---|
+| 20 | two separate problems in one call open two cases | `create_case`, `pothole`, then a second `create_case`, `missed_pickup`; 2 cases in the DB | as expected | ✅ |
+| 21 | the same problem restated stays one case | one `create_case`, one case in the DB | as expected | ✅ |
+
+Scenarios 1–19 unchanged and all passing on this run.
+
+Completions per scenario, this run:
+
+```
+   7  pothole maps to pothole                   2  correct lookup code reads its status back
+   6  trash not collected maps to missed_pickup 4  note lands on the case the code found
+   7  dark street lamp maps to streetlight      2  out of scope question touches no case tool
+   6  water main leak maps to water             3  second out of scope question
+   7  stray dog maps to animal                  2  asking for a person transfers
+   6  loud neighbours falls back to other      10  goodbye after a filed request ends the call
+   4  phone spoken with dots and dashes         4  case opened at name and phone, no issue type
+   4  phone spoken entirely in words            7  three wrong codes hand the caller to staff
+   4  seven digit phone is refused             13  two separate problems open two cases
+   1  name without a phone opens no case        9  the same problem restated stays one case
+   8  case is opened before the issue is known 116  total (cap 210)
+```
+
+116 against the fourth run's 113: the whole rise is #20, 10 → 13, which is the second case's
+`create_case` and two `update_case`s and their round trips. Still 0.55× the cap.
