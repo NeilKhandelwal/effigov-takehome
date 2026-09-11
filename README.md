@@ -158,7 +158,9 @@ gh secret set LIVEKIT_API_KEY --body "$LIVEKIT_API_KEY"
 gh secret set LIVEKIT_API_SECRET --body "$LIVEKIT_API_SECRET"
 ```
 
-The nightly is metered: the job has `timeout-minutes: 20`, the harness's own spend cap applies (`EVAL_MAX_LLM_CALLS`, `EVAL_SCENARIO_TIMEOUT_S` — see **Evals** below, overridable as repository *variables*), and a scenario that fails fails the job, because a prompt regression showing up as a red nightly run is the whole point.
+The nightly is metered: the job has `timeout-minutes: 20`, the harness's own spend cap applies (`EVAL_MAX_LLM_CALLS`, `EVAL_SCENARIO_TIMEOUT_S` — see **Evals** below, overridable as repository *variables*), and a scenario that fails *twice in a row* fails the job, because a prompt regression showing up as a red nightly run is the whole point.
+
+*What a nightly colour means.* **Red** = at least one scenario missed twice in a row, on two independent rolls with a fresh session and a fresh database each. That is the regression; read the failure. **Green** = every scenario passed, but not necessarily first time: the run's terminal summary ends with a `retried once` block naming any scenario that missed its first roll, and a scenario that keeps appearing there across nights is drifting even though the job is green. Read the block, not just the colour. `EVAL_RETRIES` (repository variable, empty = 1) is the knob; `0` restores the old one-miss-is-red behaviour.
 
 ## Testing
 
@@ -167,9 +169,10 @@ Two kinds, and only one of them costs money.
 **Unit** — offline, no keys, no LLM. `cd backend && uv run pytest` (63 tests over the endpoints, the
 audit log, call/case linking, code lookup, notes-as-events, the `since` cursor, and the migration and
 foreign keys themselves, and the refusal to boot on a pre-migration database; set `DATABASE_URL` to
-run the identical suite against Postgres) and `cd agent && uv run pytest` (12 tests over the
+run the identical suite against Postgres) and `cd agent && uv run pytest` (21 tests over the
 agent's pure helpers — phone validation, code normalization, the filed/second-case gates, summary
-assembly). These are what CI runs.
+assembly, and the eval harness's own retry loop against a stand-in attempt). These are what CI
+runs.
 
 **Dashboard** — no test runner; `cd dashboard && npm run lint && npm run build` is the check CI
 runs. The staff-login flow was verified by hand against a dev server: see the commands and output
@@ -178,11 +181,11 @@ in the pull request that added it.
 **Evals** — `cd agent && uv run pytest -m eval` runs 21 hand-labelled scenarios through the real
 `Assistant` and the real backend in-process, and checks which tools it called with what, what the
 caller would hear, and what landed in the database. They make live LLM calls and need `LIVEKIT_*`
-in `agent/.env`, so they are deselected by default. Results across four runs are recorded in
+in `agent/.env`, so they are deselected by default. Results across six runs are recorded in
 [agent/evals/RESULTS.md](agent/evals/RESULTS.md): **12/15** on the first prompt, **14/15** after
 fixing the two misses it found, **19/19** after adding scenarios for warm transfer, `end_call`, and
-null-until-classified, and **20/21** on the first run that included the two multi-case scenarios.
-Single runs, not re-rolled.
+null-until-classified, **20/21** on the first run that included the two multi-case scenarios, and
+**21/21** on the two runs since the prompt fix that closed it. Single runs, not re-rolled.
 
 *The cap.* A run is metered so a looping agent or a hung call cannot spend without a ceiling:
 `EVAL_MAX_LLM_CALLS` is the number of LLM completions the whole pytest session may make (default
@@ -190,7 +193,18 @@ Single runs, not re-rolled.
 `EVAL_SCENARIO_TIMEOUT_S` is the wall clock one scenario gets (default 90; a scenario takes ~5 s).
 Over either, the run fails: the completion that would have gone over is never made, every
 remaining scenario fails without calling out, and `pytest` exits non-zero. Locally that means the
-score is still what the run reports — nothing forces 21/21 — while in CI any miss is a red job.
+score is still what the run reports — nothing forces 21/21 — while in CI a scenario that misses
+twice is a red job.
+
+*The retry.* This model misses a given scenario about 1 run in 20, so across 21 scenarios most
+nights lost a different one and a red nightly stopped carrying any signal. A failed scenario is
+therefore run again — a fresh `AgentSession`, a fresh database, the whole scenario including its
+seeding and its DB assertions — and only the second failure raises. One miss is flake: reported,
+not counted. Two in a row is the regression. Both attempts are charged to `EVAL_MAX_LLM_CALLS`, so
+a flaky night costs a few completions more (a clean run spends ~116 of 210). `EVAL_RETRIES` sets
+the retries per scenario — default 1, `0` restores the strict single roll. Every retry taken is
+printed in a `retried once` block at the end of the run, naming the scenario and what it missed
+the first time, so drift stays visible in a green log.
 
 ## API
 

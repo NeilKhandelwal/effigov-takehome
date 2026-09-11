@@ -222,3 +222,63 @@ Completions per scenario, this run:
 
 116 against the fourth run's 113: the whole rise is #20, 10 → 13, which is the second case's
 `create_case` and two `update_case`s and their round trips. Still 0.55× the cap.
+
+## Sixth run — 21 scenarios, 2026-09-11 (feat/eval-retry, one retry per failed scenario)
+
+**21/21**, 163 s wall clock, one run, not re-rolled. **No scenario was retried**, so the retry
+path this run was meant to exercise did not fire: the loop's behaviour is pinned by the offline
+tests in `tests/test_eval_harness.py` (a stand-in attempt that fails once, then passes), not by
+this run. What this run does show is the cost of the change when nothing flakes — nothing.
+
+Nothing was retried, so the summary's new block printed nothing; the run ended at the `LLM calls`
+block it always did:
+
+```
+   7  pothole maps to pothole                   2  correct lookup code reads its status back
+   6  trash not collected maps to missed_pickup 4  note lands on the case the code found
+   6  dark street lamp maps to streetlight      1  out of scope question touches no case tool
+   7  water main leak maps to water             3  second out of scope question
+   7  stray dog maps to animal                  2  asking for a person transfers
+   6  loud neighbours falls back to other      10  goodbye after a filed request ends the call
+   4  phone spoken with dots and dashes         4  case opened at name and phone, no issue type
+   4  phone spoken entirely in words            7  three wrong codes hand the caller to staff
+   4  seven digit phone is refused             13  two separate problems open two cases
+   1  name without a phone opens no case       10  the same problem restated stays one case
+   9  case is opened before the issue is known 117  total (cap 210)
+```
+
+117 against the fifth run's 116 — the same run, one completion of noise. When something does
+flake, the run ends with a second block, one line per scenario, carrying the first attempt's error:
+
+```
+--------------------------------- retried once ---------------------------------
+<scenario>: expected a update_case call (matching its argument check) after index 1; got [...]
+1 scenario(s) missed their first roll and were re-run. A retry that passed is flake and does not
+fail the run; one that failed again is a regression and is in the failures above.
+```
+
+### Why the retry — the nightly that was red every night
+
+The nightly cron has been red on every run since it started running for real, each time on a
+different scenario, and each of those scenarios passes on other runs:
+
+| Night | Scenarios that failed | What it was |
+|---|---|---|
+| Sep 8 | two separate problems in one call open two cases | a real regression — fixed in PR #34 (the fifth run) |
+| Sep 9 | loud neighbours falls back to other | flake; passes on the third, fifth and sixth runs |
+| Sep 10 | loud neighbours falls back to other, pothole maps to pothole | flake; both pass on the sixth run |
+| Sep 11 | case opened at name and phone has no issue type yet | flake; passes on the sixth run |
+
+Per-scenario flake is roughly 1 in 20, so across 21 scenarios the expected number of misses on a
+clean night is about one — which is what the last three nights were. A signal that fires most
+nights on something that is fine is not a signal.
+
+A failed scenario is now re-run once (`EVAL_RETRIES`, default 1) from a fresh `AgentSession` and a
+fresh database, the whole scenario including its seeding and its DB assertions, and only the second
+failure raises. One miss is flake: named in the `retried once` block, not counted. Two in a row is
+the regression. With ~1-in-20 flake the odds of a scenario missing twice in a row are ~1 in 400, so
+a 21-scenario night goes red on flake roughly one night in 19 rather than most nights.
+
+Cost: both attempts are charged to `EVAL_MAX_LLM_CALLS`. A clean run is 117 of a 210 cap; one
+retried scenario adds that scenario's completions again (2–13, 5.6 on average), so a night with
+three retries is ~135 — still 0.64× the cap, which is why the default cap did not move.

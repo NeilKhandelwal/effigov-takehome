@@ -12,6 +12,9 @@ Run with: uv run pytest -m eval -q
 
 Spend is capped per run: `EVAL_MAX_LLM_CALLS` completions in total and
 `EVAL_SCENARIO_TIMEOUT_S` seconds per scenario (see `conftest.EvalBudget`).
+
+A failed scenario is re-run once before it counts (`EVAL_RETRIES`, default 1): one miss is
+this model's usual flake, two in a row is a regression. Retries are named in the summary.
 """
 
 import asyncio
@@ -195,6 +198,19 @@ SCENARIOS = [
 # --- harness ------------------------------------------------------------------------
 
 
+def fresh_db(tmp_path, monkeypatch, attempt):
+    """An empty database for one attempt at a scenario.
+
+    Per attempt, not per test: a retry re-runs the whole scenario, and the rows the first
+    attempt wrote would answer for it -- `db_cases: 2` passes on a retry that opened one.
+    """
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / f'evals-{attempt}.db'}")
+    from app import db
+
+    db.reset_engine()  # the cached engine still points at whatever ran before this test
+    db.init_db()  # ASGITransport does not run the lifespan that normally does this
+
+
 @pytest.fixture
 def backend(tmp_path, monkeypatch):
     """The real FastAPI app on a throwaway DB, wired into the agent's httpx calls.
@@ -202,11 +218,8 @@ def backend(tmp_path, monkeypatch):
     Stubbing the backend would let a scenario "pass" while writing nothing; running the
     real app means a green scenario also means the case exists.
     """
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'evals.db'}")
-    from app import db, main
-
-    db.reset_engine()  # the cached engine still points at whatever ran before this test
-    db.init_db()  # ASGITransport does not run the lifespan that normally does this
+    fresh_db(tmp_path, monkeypatch, 0)
+    from app import main
 
     transport = httpx.ASGITransport(app=main.app)
     real_client = httpx.AsyncClient
@@ -330,19 +343,13 @@ async def run_scenario(turns, budget):
         return results
 
 
-@pytest.mark.eval
-@pytest.mark.parametrize(
-    "name,turns,expected", SCENARIOS, ids=[s[0].replace(" ", "_") for s in SCENARIOS]
-)
-async def test_scenario(name, turns, expected, backend, eval_budget, monkeypatch):
-    """Each scenario encodes a case worker's judgement of what should have been filed.
+async def attempt_scenario(turns, expected, app, budget):
+    """One roll of a scenario: seed it, run the turns, and check everything it claims.
 
-    A wrong issue_type or a case opened without a phone is a real intake defect, not a
-    style difference, so these must fail when the agent stops behaving that way.
+    Every assert lives in here rather than in the test, so a retry re-runs all of them --
+    the database checks flake the same way the tool-call ones do.
     """
-    eval_budget.raise_if_spent()  # an earlier scenario blew the cap: spend nothing more
-    count_llm_calls(monkeypatch, eval_budget, name)
-    http = sync_client(backend)
+    http = sync_client(app)
     if expected.get("note_on") or expected.get("seed_case"):
         # a note needs a case to hang off; seed it through the backend's own endpoint
         seeded = http.post(
@@ -360,10 +367,10 @@ async def test_scenario(name, turns, expected, backend, eval_budget, monkeypatch
         turns = [t.format(code=seeded.json()["lookup_code"].replace("-", " ")) for t in turns]
 
     try:
-        results = await asyncio.wait_for(run_scenario(turns, eval_budget), eval_budget.timeout_s)
+        results = await asyncio.wait_for(run_scenario(turns, budget), budget.timeout_s)
     except TimeoutError:
         # a hung LLM call would otherwise hold a CI runner for the length of the job
-        pytest.fail(f"scenario ran past EVAL_SCENARIO_TIMEOUT_S={eval_budget.timeout_s:g}s")
+        pytest.fail(f"scenario ran past EVAL_SCENARIO_TIMEOUT_S={budget.timeout_s:g}s")
     calls = calls_of(results)
     check(calls, expected)
 
@@ -390,3 +397,35 @@ async def test_scenario(name, turns, expected, backend, eval_budget, monkeypatch
     if expected.get("reply_contains"):
         said = " ".join(replies_of(results)).lower()
         assert expected["reply_contains"] in said, f"agent never said {expected['reply_contains']!r}; said: {said!r}"
+
+
+@pytest.mark.eval
+@pytest.mark.parametrize(
+    "name,turns,expected", SCENARIOS, ids=[s[0].replace(" ", "_") for s in SCENARIOS]
+)
+async def test_scenario(name, turns, expected, backend, eval_budget, monkeypatch, tmp_path):
+    """Each scenario encodes a case worker's judgement of what should have been filed.
+
+    A wrong issue_type or a case opened without a phone is a real intake defect, not a
+    style difference, so these must fail when the agent stops behaving that way.
+
+    One failure is not that, though: the model misses a scenario about 1 in 20 runs, so a
+    single roll made the nightly red most nights on a different scenario each time. A
+    failed scenario is run again from a fresh session and a fresh database and only the
+    second failure raises; the first is named in the terminal summary instead. Both
+    attempts are charged to the same cap. `EVAL_RETRIES=0` restores the single roll.
+    """
+    eval_budget.raise_if_spent()  # an earlier scenario blew the cap: spend nothing more
+    count_llm_calls(monkeypatch, eval_budget, name)
+    for attempt in range(eval_budget.attempts):
+        if attempt:
+            fresh_db(tmp_path, monkeypatch, attempt)  # the retry must not see the first rows
+        try:
+            await attempt_scenario(turns, expected, backend, eval_budget)
+            return
+        except AssertionError as failure:
+            # only what the scenario judged: a blown cap or a timeout is not flake to re-roll
+            if attempt == eval_budget.attempts - 1:
+                raise
+            eval_budget.note_retry(name, failure)
+            eval_budget.raise_if_spent()  # the retry spends like any other attempt
