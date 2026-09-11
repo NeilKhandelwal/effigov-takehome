@@ -169,9 +169,10 @@ Two kinds, and only one of them costs money.
 **Unit** — offline, no keys, no LLM. `cd backend && uv run pytest` (63 tests over the endpoints, the
 audit log, call/case linking, code lookup, notes-as-events, the `since` cursor, and the migration and
 foreign keys themselves, and the refusal to boot on a pre-migration database; set `DATABASE_URL` to
-run the identical suite against Postgres) and `cd agent && uv run pytest` (19 tests over the
+run the identical suite against Postgres) and `cd agent && uv run pytest` (21 tests over the
 agent's pure helpers — phone validation, code normalization, the filed/second-case gates, summary
-assembly, and the eval harness's attempt count). These are what CI runs.
+assembly, and the eval harness's own retry loop against a stand-in attempt). These are what CI
+runs.
 
 **Dashboard** — no test runner; `cd dashboard && npm run lint && npm run build` is the check CI
 runs. The staff-login flow was verified by hand against a dev server: see the commands and output
@@ -180,11 +181,11 @@ in the pull request that added it.
 **Evals** — `cd agent && uv run pytest -m eval` runs 21 hand-labelled scenarios through the real
 `Assistant` and the real backend in-process, and checks which tools it called with what, what the
 caller would hear, and what landed in the database. They make live LLM calls and need `LIVEKIT_*`
-in `agent/.env`, so they are deselected by default. Results across four runs are recorded in
+in `agent/.env`, so they are deselected by default. Results across six runs are recorded in
 [agent/evals/RESULTS.md](agent/evals/RESULTS.md): **12/15** on the first prompt, **14/15** after
 fixing the two misses it found, **19/19** after adding scenarios for warm transfer, `end_call`, and
-null-until-classified, and **20/21** on the first run that included the two multi-case scenarios.
-Single runs, not re-rolled.
+null-until-classified, **20/21** on the first run that included the two multi-case scenarios, and
+**21/21** on the two runs since the prompt fix that closed it. Single runs, not re-rolled.
 
 *The cap.* A run is metered so a looping agent or a hung call cannot spend without a ceiling:
 `EVAL_MAX_LLM_CALLS` is the number of LLM completions the whole pytest session may make (default
